@@ -1,0 +1,132 @@
+# stdedit
+
+A terminal text editor with **zero runtime dependencies** — everything is
+Python standard library. Built for [hackathon] Track A.
+
+- Reimplements the core of `nano`/`micro`-style editing: open, navigate,
+  edit, undo/redo, select/copy/cut/paste, save.
+- Regex-based syntax highlighting infrastructure; the current core ships Python and leaves additional language packs to the language layer.
+- Full substitution log: see [`STDLIB.md`](./STDLIB.md).
+
+## Quick start
+
+```bash
+make run FILE=path/to/file.py
+```
+
+or directly:
+
+```bash
+PYTHONPATH=src python3 -m stdedit.main path/to/file.py
+```
+
+## Run tests
+
+```bash
+make test
+```
+
+## Prove zero dependencies
+
+```bash
+make proof
+cat deps-proof.txt
+```
+
+## Project layout
+
+```
+src/stdedit/
+  buffer.py         # line buffer, cursor, undo/redo, selection, clipboard, indent
+  undo.py           # snapshot-based undo/redo manager
+  tui.py            # curses front end (keymap, rendering, status bar)
+  search.py         # incremental search + find/replace-all
+  languages/
+    schema.py        # token-rule schema + per-language definitions
+tests/
+  test_buffer.py     # unit tests for the buffer core
+```
+
+## Team split
+
+| Area | Owner | Covers |
+|---|---|---|
+| TUI / rendering | Person A | curses loop, keymap, status bar, tabs, resize handling |
+| Buffer / undo    | Person B | line buffer, cursor, undo/redo, selection, clipboard, indent, file I/O |
+| Languages / search | Person C | tokenizer schema, syntax highlighting, incremental search, replace-all |
+
+See `.zero-dep.toml` for the dependency pledge and `STDLIB.md` for the
+substitution rationale.
+
+## Known limitations
+
+- `curses` is Unix-only (not tested on native Windows; WSL/macOS/Linux work).
+- Syntax highlighting is regex-based, not a full parser — good enough for
+  editing, not for semantic analysis.
+
+## Status
+
+The Person-B core is implemented and tested: open/save, cursor/scrolling,
+undo/redo, selection/copy/cut/paste, auto-indent, tabs↔spaces, bracket
+matching/auto-close, bracketed-paste handling, large-file undo protection,
+RAM/performance instrumentation, and a stdlib-only extension API.
+
+## Core memory/performance
+
+- The TUI includes a low-frequency Linux RSS meter and frame-time indicator without third-party dependencies.
+- Undo/redo history is bounded by both operation count (500) and a conservative 32 MiB history-memory budget.
+- A single snapshot larger than the history budget is not retained, so very large files do not create another full-buffer history copy.
+- `tools/bench_memory.py` measures the core Buffer RSS for representative file sizes.
+
+
+## Extensions
+
+stdedit has a small optional Python extension API. Extensions are loaded from:
+
+1. `STDEDIT_EXTENSIONS` (one or more directories separated by `:` on Linux)
+2. `.stdedit/extensions/` in the current project
+3. `~/.config/stdedit/extensions/`
+
+An extension is a normal Python file exposing `setup(api)` (or `register(api)`).
+It can add commands, key handlers, lifecycle callbacks, and status-bar text.
+Extension import failures are isolated so a broken plugin cannot prevent the core
+editor from starting.
+
+Example files are in `examples/extensions/`.
+
+Use `--no-extensions` to start the editor without loading user extensions.
+
+## External extensions
+
+Extensions are normal Python files; they are **not imported by default** so the
+base editor keeps its RSS low. Put them in `.stdedit/extensions/` in a project
+or `~/.config/stdedit/extensions/`, or point `STDEDIT_EXTENSIONS` at a directory.
+
+Load one by name:
+
+```sh
+make run FILE=MARK1.py ARGS="--extension vim_command"
+```
+
+or directly:
+
+```sh
+python -m stdedit.main MARK1.py --extension vim_command
+python -m stdedit.main MARK1.py --extension-file /path/to/my_extension.py
+```
+
+See what is available without importing anything:
+
+```sh
+python -m stdedit.main --list-extensions
+```
+
+To deliberately load every discovered extension:
+
+```sh
+python -m stdedit.main MARK1.py --all-extensions
+```
+
+The extension API supports commands, key bindings, lifecycle hooks and status
+providers. Extension code is isolated so a broken extension does not crash the
+core editor.

@@ -1,0 +1,69 @@
+== stdedit dependency proof ==
+python: Python 3.14.7
+
+-- sys.path (no site-packages should be required) --
+
+/usr/lib/python314.zip
+/usr/lib/python3.14
+/usr/lib/python3.14/lib-dynload
+/home/kunal/PyCharmMiscProject/stdedit_core_lowrss_extensions/.venv/lib/python3.14/site-packages
+
+-- import trace for stdedit --
+Newly imported modules:
+ - _ast
+ - _curses
+ - _opcode
+ - _opcode_metadata
+ - _sre
+ - _tokenize
+ - _typing
+ - _weakrefset
+ - annotationlib
+ - array
+ - ast
+ - copy
+ - copyreg
+ - curses
+ - dataclasses
+ - dis
+ - enum
+ - fcntl
+ - fnmatch
+ - glob
+ - grp
+ - importlib._abc
+ - importlib.machinery
+ - importlib.util
+ - inspect
+ - io
+ - mmap
+ - ntpath
+ - opcode
+ - pathlib
+ - pathlib._os
+ - pwd
+ - re
+ - re._casefix
+ - re._compiler
+ - re._constants
+ - re._parser
+ - stdedit
+ - stdedit.buffer
+ - stdedit.compact
+ - stdedit.extensions
+ - stdedit.extensions.api
+ - stdedit.extensions.loader
+ - stdedit.languages
+ - stdedit.languages.schema
+ - stdedit.mapped
+ - stdedit.perf
+ - stdedit.search
+ - stdedit.tui
+ - stdedit.undo
+ - token
+ - tokenize
+ - typing
+ - weakref
+
+No site-packages modules imported. Clean.
+
