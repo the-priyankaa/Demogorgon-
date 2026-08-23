@@ -147,8 +147,11 @@ python -m stdedit.main docker-compose.yml
 - **R**: Reveal the tree root in the system file manager (xdg-open/open)
 - **h**: Show or hide dotfiles (IDE/build artifacts stay hidden regardless)
 - **Ctrl-O**: Open a file by typed path (supports `~`)
-- **CLI**: `--project DIR` roots the tree at an explicit project folder
-  (precedence: --project > opened file's parent > cwd)
+- **CLI**: installed as the `stdedit` command (editable install in
+  `.venv`, symlinked to `~/.local/bin`). The positional argument is
+  smart: a directory opens as a project, anything else is the file to
+  edit. `--project DIR` roots the tree explicitly (precedence:
+  --project > positional dir > opened file's parent > cwd).
 
 The tree shows only working project files: IDE metadata (.idea/.vscode),
 VCS internals (.git), dependency dirs (node_modules/venv), caches

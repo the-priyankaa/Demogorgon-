@@ -71,16 +71,47 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def resolve_open_targets(file_arg, project_arg):
+    """Work out what to open from the command line.
+
+    The positional argument is smart: a directory means "open this
+    project" (same as --project), anything else is the file to edit.
+
+    Returns (buffer_file, project_dir, error):
+      buffer_file  -- file argument to load (may not exist yet: new file)
+      project_dir  -- absolute folder for the file tree, or None
+      error        -- user-facing message when the arguments conflict
+    """
+    project_dir = None
+    if project_arg:
+        candidate = os.path.abspath(os.path.expanduser(project_arg))
+        if not os.path.isdir(candidate):
+            return None, None, f"--project: not a directory: {project_arg}"
+        project_dir = candidate
+
+    buffer_file = None
+    if file_arg:
+        candidate = os.path.abspath(os.path.expanduser(file_arg))
+        if os.path.isdir(candidate):
+            if project_dir:
+                return (
+                    None,
+                    None,
+                    "give the project once — positionally or via --project",
+                )
+            project_dir = candidate
+        else:
+            buffer_file = file_arg
+    return buffer_file, project_dir, None
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
 
-    project_dir = None
-    if args.project:
-        candidate = os.path.abspath(os.path.expanduser(args.project))
-        if not os.path.isdir(candidate):
-            print(f"stdedit: --project: not a directory: {args.project}", file=sys.stderr)
-            return 2
-        project_dir = candidate
+    buffer_file, project_dir, error = resolve_open_targets(args.file, args.project)
+    if error:
+        print(f"stdedit: {error}", file=sys.stderr)
+        return 2
 
     if args.list_extensions:
         dirs = extension_dirs()
@@ -97,12 +128,12 @@ def main(argv=None) -> int:
         use_spaces=not args.tabs,
         large_file_threshold=max(0, args.large_file_mb) * 1024 * 1024,
     )
-    if args.file:
+    if buffer_file:
         try:
-            buf.load(args.file)
+            buf.load(buffer_file)
         except FileNotFoundError:
             # New file — that's fine, just remember the intended name.
-            buf.filename = args.file
+            buf.filename = buffer_file
 
     # Extensions are opt-in so the bare editor stays lean.
     # --all-extensions keeps the old eager behavior for power users.

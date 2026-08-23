@@ -10,13 +10,20 @@ Python standard library. Built for [hackathon] Track A.
 
 ## Quick start
 
+After installing the package (`.venv/bin/pip install -e .`) the editor is
+available as the `stdedit` command:
+
 ```bash
-make run FILE=path/to/file.py
+stdedit path/to/file.py        # edit a file (tree roots at its folder)
+stdedit path/to/project        # open a whole project (positional dir)
+stdedit --project ~/myapp x.py # project root + file, explicitly
 ```
 
-or directly:
+Without a global install, run it from this folder:
 
 ```bash
+make run FILE=path/to/file.py
+# or directly:
 PYTHONPATH=src python3 -m stdedit.main path/to/file.py
 ```
 
