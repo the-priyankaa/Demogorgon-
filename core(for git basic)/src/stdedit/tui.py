@@ -27,18 +27,26 @@ Replace `run()` with a real curses.wrapper(...) loop.
 from __future__ import annotations
 
 import curses
+import os
 import sys
 
 from .buffer import Buffer
 from .languages import schema
 from .perf import PerfMeter
 from .extensions import ExtensionAPI, load_extensions, load_requested_extensions
+from .explorer import FileExplorer
 
 _COLOR_PAIRS = {
     "keyword": 1,
     "string": 2,
     "comment": 3,
     "number": 4,
+    "function": 5,
+    "type": 6,
+    "operator": 7,
+    "tag": 8,
+    "attribute": 9,
+    "property": 10,
 }
 
 _PASTE_START = "\x1b[200~"
@@ -68,6 +76,12 @@ def _init_colors() -> None:
     curses.init_pair(_COLOR_PAIRS["string"], curses.COLOR_GREEN, -1)
     curses.init_pair(_COLOR_PAIRS["comment"], curses.COLOR_CYAN, -1)
     curses.init_pair(_COLOR_PAIRS["number"], curses.COLOR_YELLOW, -1)
+    curses.init_pair(_COLOR_PAIRS["function"], curses.COLOR_BLUE, -1)
+    curses.init_pair(_COLOR_PAIRS["type"], curses.COLOR_YELLOW, -1)
+    curses.init_pair(_COLOR_PAIRS["operator"], curses.COLOR_RED, -1)
+    curses.init_pair(_COLOR_PAIRS["tag"], curses.COLOR_MAGENTA, -1)
+    curses.init_pair(_COLOR_PAIRS["attribute"], curses.COLOR_CYAN, -1)
+    curses.init_pair(_COLOR_PAIRS["property"], curses.COLOR_BLUE, -1)
 
 
 def _enable_bracketed_paste() -> None:
@@ -148,6 +162,7 @@ def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extens
     selecting = False
     meter = PerfMeter(interval=0.5)
     editor = EditorContext(buf, stdscr)
+    explorer = FileExplorer(".")
     extensions = ExtensionAPI(editor)
     if load_all_extensions or load_user_extensions:
         loaded, extension_errors = load_extensions(extensions)
@@ -161,36 +176,44 @@ def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extens
         status = f"Loaded extensions: {', '.join(loaded)}" if loaded else ""
         if extension_errors:
             status = (status + "  " if status else "") + f"{len(extension_errors)} extension error(s)"
-        _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor)
+        _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer)
     finally:
         extensions.shutdown()
         _disable_bracketed_paste()
 
 
-def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext) -> None:
+def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext, explorer: FileExplorer) -> None:
     while True:
         frame_started = meter.frame_start()
         stdscr.erase()
         height, width = stdscr.getmaxyx()
         text_height = height - 1  # reserve last row for status line
+
+        # Calculate explorer width
+        explorer_width = 25 if explorer.visible else 0
+
+        # Draw file explorer if visible
+        if explorer.visible:
+            _draw_explorer(stdscr, explorer, text_height, explorer_width)
+
         gutter_width = line_number_width(len(buf.lines)) + 2
-        text_width = max(1, width - gutter_width)
+        text_width = max(1, width - explorer_width - gutter_width)
 
         buf.update_scroll(text_height, text_width)
 
         for row in range(text_height):
             line_idx = buf.scroll_y + row
-            _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width)
+            _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width, x_offset=explorer_width)
             if line_idx >= len(buf.lines):
                 continue
             line = buf.lines[line_idx]
             _draw_line(
                 stdscr, row, line, buf.scroll_x, text_width, language,
-                x_offset=gutter_width,
+                x_offset=gutter_width + explorer_width,
             )
             _highlight_selection(
                 stdscr, row, line_idx, line, buf,
-                scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width,
+                scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width + explorer_width,
             )
 
         dirty = "*" if buf.modified else ""
@@ -212,7 +235,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         stdscr.move(
             buf.cursor_y - buf.scroll_y,
-            gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
+            explorer_width + gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
         )
         stdscr.refresh()
         meter.frame_end(frame_started)
@@ -229,7 +252,44 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             status = editor.status or ""
             continue
 
-        if key == curses.KEY_RESIZE:
+        # Handle file explorer keys when active
+        if explorer.visible and explorer.active:
+            if key == curses.KEY_UP:
+                explorer.move_selection(-1)
+                continue
+            elif key == curses.KEY_DOWN:
+                explorer.move_selection(1)
+                continue
+            elif key in ("\n", "\r"):  # Enter - open file or toggle directory
+                selected = explorer.get_selected()
+                if selected:
+                    depth, name, path, is_dir = selected
+                    if is_dir:
+                        explorer.toggle_expand(explorer.selected_idx)
+                    else:
+                        # Open the file
+                        try:
+                            buf.load(path)
+                            language = schema.detect_language(buf.filename or "")
+                            explorer.active = False
+                            status = f"Opened {path}"
+                        except Exception as e:
+                            status = f"Error opening file: {e}"
+                continue
+            elif key == "\x05":  # Ctrl-E - toggle focus back to editor
+                explorer.active = False
+                continue
+
+        if key == "\x05":  # Ctrl-E - toggle explorer visibility
+            explorer.visible = not explorer.visible
+            if explorer.visible:
+                explorer.active = True
+                status = "Explorer opened (Ctrl-E to close, Enter to open file/folder)"
+            else:
+                explorer.active = False
+                status = "Explorer closed"
+            continue
+        elif key == curses.KEY_RESIZE:
             continue
         elif key == "\x1b":  # ESC — check whether this is a bracketed paste
             stdscr.nodelay(True)
@@ -325,7 +385,38 @@ def line_number_width(line_count: int) -> int:
     return max(2, len(str(max(1, line_count))))
 
 
-def _draw_gutter(stdscr, row: int, line_idx: int, line_count: int, gutter_width: int) -> None:
+def _draw_explorer(stdscr, explorer: FileExplorer, height: int, width: int) -> None:
+    """Draw the file explorer panel on the left side."""
+    # Draw vertical separator
+    for row in range(height):
+        try:
+            stdscr.addstr(row, width - 1, "│", curses.A_DIM)
+        except curses.error:
+            pass
+
+    # Draw explorer items
+    visible_items = explorer.items[:]
+    start_idx = max(0, explorer.selected_idx - height // 2)
+    end_idx = min(len(visible_items), start_idx + height)
+
+    for i, row in enumerate(range(start_idx, end_idx)):
+        if row >= len(visible_items):
+            break
+        depth, name, path, is_dir = visible_items[row]
+        indent = "  " * depth
+        display = f"{indent}{name}"[:width - 2]
+
+        attr = curses.A_REVERSE if row == explorer.selected_idx else 0
+        if is_dir and row != explorer.selected_idx:
+            attr |= curses.A_BOLD
+
+        try:
+            stdscr.addstr(i, 0, display.ljust(width - 2)[:width - 2], attr)
+        except curses.error:
+            pass
+
+
+def _draw_gutter(stdscr, row: int, line_idx: int, line_count: int, gutter_width: int, x_offset: int = 0) -> None:
     """Draw a stable, 1-indexed line-number gutter.
 
     The gutter is intentionally outside the horizontally scrolling text area,
@@ -338,7 +429,7 @@ def _draw_gutter(stdscr, row: int, line_idx: int, line_count: int, gutter_width:
         label = " " * digits
     label = f"{label} "  # one separator column
     try:
-        stdscr.addstr(row, 0, label[:gutter_width], curses.A_DIM)
+        stdscr.addstr(row, x_offset, label[:gutter_width], curses.A_DIM)
     except curses.error:
         pass
 

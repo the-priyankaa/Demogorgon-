@@ -50,6 +50,217 @@ LANGUAGES: Dict[str, dict] = {
             ("number", r"\b\d+(?:\.\d+)?\b"),
         ],
     },
+    "javascript": {
+        "extensions": [".js", ".jsx", ".mjs"],
+        "rules": [
+            ("comment", r"//.*|/\*.*?\*/"),
+            ("string", r"(`(?:[^`\\]|\\.)*`|\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')"),
+            (
+                "keyword",
+                r"\b(?:function|const|let|var|if|else|for|while|do|switch|case|default|"
+                r"break|continue|return|try|catch|finally|throw|async|await|class|"
+                r"extends|import|export|from|as|new|this|super|static|get|set|"
+                r"typeof|instanceof|in|of|delete|void|yield|with)\b",
+            ),
+            ("number", r"\b(?:0x[0-9a-fA-F]+|\d+\.?\d*(?:[eE][+-]?\d+)?)\b"),
+            ("function", r"\b[a-zA-Z_$][a-zA-Z0-9_$]*(?=\s*\()"),
+        ],
+    },
+    "typescript": {
+        "extensions": [".ts", ".tsx"],
+        "rules": [
+            ("comment", r"//.*|/\*.*?\*/"),
+            ("string", r"(`(?:[^`\\]|\\.)*`|\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')"),
+            (
+                "keyword",
+                r"\b(?:function|const|let|var|if|else|for|while|do|switch|case|default|"
+                r"break|continue|return|try|catch|finally|throw|async|await|class|"
+                r"extends|import|export|from|as|new|this|super|static|get|set|"
+                r"typeof|instanceof|in|of|delete|void|yield|with|interface|type|"
+                r"enum|namespace|module|declare|abstract|implements|public|private|"
+                r"protected|readonly|override)\b",
+            ),
+            ("type", r"\b(?:string|number|boolean|any|void|never|unknown|object|null|undefined)\b"),
+            ("number", r"\b(?:0x[0-9a-fA-F]+|\d+\.?\d*(?:[eE][+-]?\d+)?)\b"),
+            ("function", r"\b[a-zA-Z_$][a-zA-Z0-9_$]*(?=\s*[<(])"),
+        ],
+    },
+    "html": {
+        "extensions": [".html", ".htm"],
+        "rules": [
+            ("comment", r"<!--.*?-->"),
+            ("tag", r"</?[a-zA-Z][a-zA-Z0-9-]*|/?>"),
+            ("attribute", r"\b[a-zA-Z-]+(?==)"),
+            ("string", r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'"),
+        ],
+    },
+    "css": {
+        "extensions": [".css", ".scss", ".sass"],
+        "rules": [
+            ("comment", r"/\*.*?\*/|//.*"),
+            ("property", r"\b[a-z-]+(?=\s*:)"),
+            ("keyword", r"@(?:media|import|font-face|keyframes|charset|namespace|supports|page|document)"),
+            ("string", r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'"),
+            ("number", r"\b\d+(?:\.\d+)?(?:px|em|rem|%|vh|vw|ch|ex|cm|mm|in|pt|pc|s|ms|deg|rad|turn)?\b"),
+            ("function", r"\b[a-z-]+(?=\()"),
+        ],
+    },
+    "c": {
+        "extensions": [".c", ".h"],
+        "rules": [
+            ("comment", r"//.*|/\*.*?\*/"),
+            ("string", r"\"(?:[^\"\\]|\\.)*\""),
+            (
+                "keyword",
+                r"\b(?:auto|break|case|char|const|continue|default|do|double|else|enum|"
+                r"extern|float|for|goto|if|inline|int|long|register|restrict|return|"
+                r"short|signed|sizeof|static|struct|switch|typedef|union|unsigned|void|"
+                r"volatile|while|_Bool|_Complex|_Imaginary)\b",
+            ),
+            ("number", r"\b(?:0x[0-9a-fA-F]+|\d+\.?\d*(?:[eE][+-]?\d+)?[fFlLuU]*)\b"),
+            ("function", r"\b[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()"),
+        ],
+    },
+    "cpp": {
+        "extensions": [".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".h++", ".C"],
+        "rules": [
+            ("comment", r"//.*|/\*.*?\*/"),
+            ("string", r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'"),
+            (
+                "keyword",
+                r"\b(?:alignas|alignof|and|and_eq|asm|auto|bitand|bitor|bool|break|case|"
+                r"catch|char|char8_t|char16_t|char32_t|class|compl|concept|const|consteval|"
+                r"constexpr|constinit|const_cast|continue|co_await|co_return|co_yield|"
+                r"decltype|default|delete|do|double|dynamic_cast|else|enum|explicit|export|"
+                r"extern|false|float|for|friend|goto|if|inline|int|long|mutable|namespace|"
+                r"new|noexcept|not|not_eq|nullptr|operator|or|or_eq|private|protected|public|"
+                r"register|reinterpret_cast|requires|return|short|signed|sizeof|static|"
+                r"static_assert|static_cast|struct|switch|template|this|thread_local|throw|"
+                r"true|try|typedef|typeid|typename|union|unsigned|using|virtual|void|"
+                r"volatile|wchar_t|while|xor|xor_eq)\b",
+            ),
+            ("number", r"\b(?:0x[0-9a-fA-F]+|\d+\.?\d*(?:[eE][+-]?\d+)?[fFlLuU]*)\b"),
+            ("function", r"\b[a-zA-Z_][a-zA-Z0-9_]*(?=\s*[<(])"),
+        ],
+    },
+    "java": {
+        "extensions": [".java"],
+        "rules": [
+            ("comment", r"//.*|/\*.*?\*/"),
+            ("string", r"\"(?:[^\"\\]|\\.)*\""),
+            (
+                "keyword",
+                r"\b(?:abstract|assert|boolean|break|byte|case|catch|char|class|const|"
+                r"continue|default|do|double|else|enum|extends|final|finally|float|for|"
+                r"goto|if|implements|import|instanceof|int|interface|long|native|new|"
+                r"package|private|protected|public|return|short|static|strictfp|super|"
+                r"switch|synchronized|this|throw|throws|transient|try|void|volatile|while)\b",
+            ),
+            ("type", r"\b(?:Boolean|Byte|Character|Double|Float|Integer|Long|Short|String|Object|void)\b"),
+            ("number", r"\b(?:0x[0-9a-fA-F]+|\d+\.?\d*(?:[eE][+-]?\d+)?[fFdDlL]*)\b"),
+            ("function", r"\b[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()"),
+        ],
+    },
+    "rust": {
+        "extensions": [".rs"],
+        "rules": [
+            ("comment", r"//.*|/\*.*?\*/"),
+            ("string", r'"(?:[^"\\]|\\.)*"'),
+            (
+                "keyword",
+                r"\b(?:as|async|await|break|const|continue|crate|dyn|else|enum|extern|"
+                r"false|fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|"
+                r"self|Self|static|struct|super|trait|true|type|unsafe|use|where|while)\b",
+            ),
+            ("type", r"\b(?:i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f32|f64|bool|char|str)\b"),
+            ("number", r"\b(?:0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+|\d[\d_]*\.?[\d_]*(?:[eE][+-]?[\d_]+)?)\b"),
+            ("function", r"\b[a-z_][a-z0-9_]*!?(?=\s*[(<])"),
+        ],
+    },
+    "go": {
+        "extensions": [".go"],
+        "rules": [
+            ("comment", r"//.*|/\*.*?\*/"),
+            ("string", r"`[^`]*`|\"(?:[^\"\\]|\\.)*\""),
+            (
+                "keyword",
+                r"\b(?:break|case|chan|const|continue|default|defer|else|fallthrough|"
+                r"for|func|go|goto|if|import|interface|map|package|range|return|select|"
+                r"struct|switch|type|var)\b",
+            ),
+            ("type", r"\b(?:bool|byte|complex64|complex128|error|float32|float64|int|int8|"
+                r"int16|int32|int64|rune|string|uint|uint8|uint16|uint32|uint64|uintptr)\b"),
+            ("number", r"\b(?:0x[0-9a-fA-F]+|\d+\.?\d*(?:[eE][+-]?\d+)?)\b"),
+            ("function", r"\b[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()"),
+        ],
+    },
+    "json": {
+        "extensions": [".json"],
+        "rules": [
+            ("keyword", r"\b(?:true|false|null)\b"),
+            ("string", r"\"(?:[^\"\\]|\\.)*\""),
+            ("number", r"-?\d+\.?\d*(?:[eE][+-]?\d+)?"),
+        ],
+    },
+    "yaml": {
+        "extensions": [".yaml", ".yml"],
+        "rules": [
+            ("comment", r"#.*"),
+            ("keyword", r"\b(?:true|false|null|yes|no|on|off)\b"),
+            ("string", r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'"),
+            ("number", r"\b-?\d+\.?\d*(?:[eE][+-]?\d+)?\b"),
+            ("property", r"^\s*[a-zA-Z_][a-zA-Z0-9_-]*(?=\s*:)"),
+        ],
+    },
+    "markdown": {
+        "extensions": [".md", ".markdown"],
+        "rules": [
+            ("comment", r"<!--.*?-->"),
+            ("keyword", r"^#{1,6}\s.*$|^\*\*.*?\*\*|^__.*?__|^\*.*?\*|^_.*?_"),
+            ("string", r"`[^`]*`|```[\s\S]*?```"),
+        ],
+    },
+    "shell": {
+        "extensions": [".sh", ".bash", ".zsh"],
+        "rules": [
+            ("comment", r"#.*"),
+            ("string", r"\"(?:[^\"\\$]|\\.)*\"|'[^']*'"),
+            (
+                "keyword",
+                r"\b(?:if|then|else|elif|fi|case|esac|for|while|do|done|in|function|"
+                r"return|break|continue|exit|export|declare|local|readonly|shift|"
+                r"eval|exec|source|alias|unalias|type|command)\b",
+            ),
+            ("function", r"\b[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\(\s*\))"),
+        ],
+    },
+    "sql": {
+        "extensions": [".sql"],
+        "rules": [
+            ("comment", r"--.*|/\*.*?\*/"),
+            ("string", r"'(?:[^'\\]|\\.)*'"),
+            (
+                "keyword",
+                r"\b(?:SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TABLE|"
+                r"INDEX|VIEW|DATABASE|SCHEMA|PRIMARY|FOREIGN|KEY|CONSTRAINT|NULL|NOT|"
+                r"AND|OR|IN|LIKE|BETWEEN|JOIN|LEFT|RIGHT|INNER|OUTER|ON|AS|GROUP|BY|"
+                r"ORDER|HAVING|LIMIT|OFFSET|UNION|ALL|DISTINCT|EXISTS|CASE|WHEN|THEN|"
+                r"ELSE|END|BEGIN|COMMIT|ROLLBACK|TRANSACTION)\b",
+            ),
+            ("type", r"\b(?:INTEGER|INT|SMALLINT|BIGINT|DECIMAL|NUMERIC|FLOAT|REAL|DOUBLE|"
+                r"CHAR|VARCHAR|TEXT|DATE|TIME|TIMESTAMP|BOOLEAN|BOOL)\b"),
+            ("number", r"\b\d+\.?\d*\b"),
+        ],
+    },
+    "xml": {
+        "extensions": [".xml", ".svg", ".xhtml"],
+        "rules": [
+            ("comment", r"<!--.*?-->"),
+            ("tag", r"</?[a-zA-Z][a-zA-Z0-9:-]*|/?>"),
+            ("attribute", r"\b[a-zA-Z:-]+(?==)"),
+            ("string", r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'"),
+        ],
+    },
 }
 
 # Precompiled per-language matchers, built lazily from LANGUAGES so

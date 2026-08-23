@@ -8,6 +8,60 @@ class TestLanguageDetection(unittest.TestCase):
         self.assertEqual(detect_language("main.py"), "python")
         self.assertEqual(detect_language("script.pyw"), "python")
 
+    def test_detects_javascript_by_extension(self):
+        self.assertEqual(detect_language("app.js"), "javascript")
+        self.assertEqual(detect_language("component.jsx"), "javascript")
+        self.assertEqual(detect_language("module.mjs"), "javascript")
+
+    def test_detects_typescript_by_extension(self):
+        self.assertEqual(detect_language("app.ts"), "typescript")
+        self.assertEqual(detect_language("component.tsx"), "typescript")
+
+    def test_detects_html_by_extension(self):
+        self.assertEqual(detect_language("index.html"), "html")
+        self.assertEqual(detect_language("page.htm"), "html")
+
+    def test_detects_css_by_extension(self):
+        self.assertEqual(detect_language("style.css"), "css")
+        self.assertEqual(detect_language("style.scss"), "css")
+
+    def test_detects_c_by_extension(self):
+        self.assertEqual(detect_language("main.c"), "c")
+        self.assertEqual(detect_language("header.h"), "c")
+
+    def test_detects_cpp_by_extension(self):
+        self.assertEqual(detect_language("main.cpp"), "cpp")
+        self.assertEqual(detect_language("header.hpp"), "cpp")
+
+    def test_detects_java_by_extension(self):
+        self.assertEqual(detect_language("Main.java"), "java")
+
+    def test_detects_rust_by_extension(self):
+        self.assertEqual(detect_language("main.rs"), "rust")
+
+    def test_detects_go_by_extension(self):
+        self.assertEqual(detect_language("main.go"), "go")
+
+    def test_detects_json_by_extension(self):
+        self.assertEqual(detect_language("config.json"), "json")
+
+    def test_detects_yaml_by_extension(self):
+        self.assertEqual(detect_language("config.yaml"), "yaml")
+        self.assertEqual(detect_language("config.yml"), "yaml")
+
+    def test_detects_markdown_by_extension(self):
+        self.assertEqual(detect_language("README.md"), "markdown")
+
+    def test_detects_shell_by_extension(self):
+        self.assertEqual(detect_language("script.sh"), "shell")
+        self.assertEqual(detect_language("script.bash"), "shell")
+
+    def test_detects_sql_by_extension(self):
+        self.assertEqual(detect_language("query.sql"), "sql")
+
+    def test_detects_xml_by_extension(self):
+        self.assertEqual(detect_language("config.xml"), "xml")
+
     def test_unknown_extension_is_plaintext(self):
         self.assertEqual(detect_language("notes.txt"), "plaintext")
         self.assertEqual(detect_language("no_extension"), "plaintext")
@@ -54,6 +108,100 @@ class TestPythonTokenizer(unittest.TestCase):
 
     def test_unknown_language_returns_no_tokens(self):
         self.assertEqual(tokenize("anything at all", "made_up_lang"), [])
+
+
+class TestJavaScriptTokenizer(unittest.TestCase):
+    def test_keyword_detected(self):
+        spans = tokenize("function test() {}", "javascript")
+        kinds = [s[2] for s in spans]
+        self.assertIn("keyword", kinds)
+
+    def test_string_detected(self):
+        spans = tokenize('const x = "hello"', "javascript")
+        found = [s for s in spans if s[2] == "string"]
+        self.assertTrue(found)
+
+    def test_comment_detected(self):
+        spans = tokenize("let x = 1; // comment", "javascript")
+        found = [s for s in spans if s[2] == "comment"]
+        self.assertTrue(found)
+
+    def test_function_detected(self):
+        spans = tokenize("myFunc()", "javascript")
+        found = [s for s in spans if s[2] == "function"]
+        self.assertTrue(found)
+
+
+class TestTypeScriptTokenizer(unittest.TestCase):
+    def test_type_keyword_detected(self):
+        spans = tokenize("let x: string = 'hello'", "typescript")
+        found = [s for s in spans if s[2] == "type"]
+        self.assertTrue(found)
+
+    def test_interface_keyword_detected(self):
+        spans = tokenize("interface User {}", "typescript")
+        kinds = [s[2] for s in spans]
+        self.assertIn("keyword", kinds)
+
+
+class TestHTMLTokenizer(unittest.TestCase):
+    def test_tag_detected(self):
+        spans = tokenize('<div class="container">', "html")
+        found = [s for s in spans if s[2] == "tag"]
+        self.assertTrue(found)
+
+    def test_attribute_detected(self):
+        spans = tokenize('<div class="test">', "html")
+        found = [s for s in spans if s[2] == "attribute"]
+        self.assertTrue(found)
+
+
+class TestCSSTokenizer(unittest.TestCase):
+    def test_property_detected(self):
+        spans = tokenize("color: red;", "css")
+        found = [s for s in spans if s[2] == "property"]
+        self.assertTrue(found)
+
+    def test_comment_detected(self):
+        spans = tokenize("/* comment */", "css")
+        found = [s for s in spans if s[2] == "comment"]
+        self.assertTrue(found)
+
+
+class TestCTokenizer(unittest.TestCase):
+    def test_keyword_detected(self):
+        spans = tokenize("int main() {", "c")
+        kinds = [s[2] for s in spans]
+        self.assertIn("keyword", kinds)
+
+    def test_function_detected(self):
+        spans = tokenize("printf()", "c")
+        found = [s for s in spans if s[2] == "function"]
+        self.assertTrue(found)
+
+
+class TestRustTokenizer(unittest.TestCase):
+    def test_keyword_detected(self):
+        spans = tokenize("fn main() {", "rust")
+        kinds = [s[2] for s in spans]
+        self.assertIn("keyword", kinds)
+
+    def test_type_detected(self):
+        spans = tokenize("let x: i32 = 5;", "rust")
+        found = [s for s in spans if s[2] == "type"]
+        self.assertTrue(found)
+
+
+class TestJavaTokenizer(unittest.TestCase):
+    def test_keyword_detected(self):
+        spans = tokenize("public class Main {", "java")
+        kinds = [s[2] for s in spans]
+        self.assertIn("keyword", kinds)
+
+    def test_type_detected(self):
+        spans = tokenize("String name;", "java")
+        found = [s for s in spans if s[2] == "type"]
+        self.assertTrue(found)
 
 
 if __name__ == "__main__":
