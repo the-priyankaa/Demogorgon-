@@ -38,13 +38,25 @@ cat deps-proof.txt
 ```
 src/stdedit/
   buffer.py         # line buffer, cursor, undo/redo, selection, clipboard, indent
+  compact.py        # compact bytearray line storage for large documents
+  mapped.py         # memory-mapped read-mostly line store for huge files
   undo.py           # snapshot-based undo/redo manager
+  perf.py           # RSS / frame-time instrumentation
   tui.py            # curses front end (keymap, rendering, status bar)
-  search.py         # incremental search + find/replace-all
+  explorer.py       # file tree explorer panel (Ctrl-E)
+  search.py         # incremental search + find/replace-all (stub)
+  extensions/       # extension API + loader
+    api.py
+    loader.py
   languages/
     schema.py        # token-rule schema + per-language definitions
+examples/
+  extensions/        # example extensions (word count, vim demo, ...)
+tools/
+  bench_memory.py    # core Buffer RSS benchmark
 tests/
   test_buffer.py     # unit tests for the buffer core
+  test_languages.py  # language detection + tokenizer tests
 ```
 
 ## Team split
