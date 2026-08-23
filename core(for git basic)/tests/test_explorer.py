@@ -83,6 +83,53 @@ class TestTreeBuilding(ExplorerTestBase):
             self.assertNotIn(os.path.basename(d), joined)
 
 
+class TestJunkFiltering(ExplorerTestBase):
+    def make_junk(self):
+        """Create representative IDE/build artifacts in the temp root."""
+        os.mkdir(os.path.join(self.root, ".idea"))
+        os.mkdir(os.path.join(self.root, ".vscode"))
+        os.mkdir(os.path.join(self.root, ".git"))
+        os.mkdir(os.path.join(self.root, "dist"))
+        os.mkdir(os.path.join(self.root, "build"))
+        os.mkdir(os.path.join(self.root, "env"))
+        os.mkdir(os.path.join(self.root, "mypkg.egg-info"))
+        with open(os.path.join(self.root, "module.pyc"), "w") as f:
+            f.write("junk")
+
+    def test_ide_and_build_artifacts_hidden_by_default(self):
+        self.make_junk()
+        e = FileExplorer(self.root)
+        joined = " ".join(self.paths(e))
+        for junk in (".idea", ".vscode", ".git", "dist", "build", "env",
+                     "mypkg.egg-info", "module.pyc"):
+            self.assertNotIn(junk, joined)
+
+    def test_ide_and_build_artifacts_stay_hidden_with_h(self):
+        self.make_junk()
+        e = FileExplorer(self.root)
+        e.toggle_hidden()
+        joined = " ".join(self.paths(e))
+        for junk in (".idea", ".vscode", ".git", "dist", "build", "env",
+                     "mypkg.egg-info", "module.pyc"):
+            self.assertNotIn(junk, joined)
+
+    def test_useful_dotfiles_still_toggle_with_h(self):
+        self.make_junk()
+        with open(os.path.join(self.root, ".gitignore"), "w") as f:
+            f.write("*.log\n")
+        e = FileExplorer(self.root)
+        self.assertNotIn(".gitignore", " ".join(self.paths(e)))
+        e.toggle_hidden()
+        self.assertIn(".gitignore", " ".join(self.paths(e)))
+
+    def test_project_files_unaffected_by_filtering(self):
+        self.make_junk()
+        e = FileExplorer(self.root)
+        joined = " ".join(self.paths(e))
+        for keep in ("alpha.txt", "beta.py", "sub_one", "sub_two"):
+            self.assertIn(keep, joined)
+
+
 class TestRootingAndNavigation(ExplorerTestBase):
     def test_set_root_reroots_tree(self):
         e = FileExplorer(".")

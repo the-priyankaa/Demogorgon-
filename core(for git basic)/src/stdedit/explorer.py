@@ -22,7 +22,19 @@ Item = Tuple[int, str, str, bool]  # depth, display_name, absolute_path, is_dir
 
 
 class FileExplorer:
-    IGNORED_NAMES = {"__pycache__", "venv", ".venv", "node_modules"}
+    # Never rendered, even when show_hidden is on: IDE metadata, VCS
+    # internals, dependency directories, caches and build outputs.
+    # Only working project files belong in the tree.
+    ALWAYS_IGNORED_NAMES = {
+        ".git", ".idea", ".vscode", ".DS_Store",
+        "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        ".tox", ".eggs",
+        "venv", ".venv", "env",
+        "node_modules",
+        "build", "dist",
+    }
+    # Suffix-based junk: packaged metadata and compiled bytecode.
+    ALWAYS_IGNORED_SUFFIXES = (".egg-info", ".pyc")
 
     def __init__(self, root_dir: str = ".") -> None:
         self.root_dir = os.path.abspath(root_dir)
@@ -198,7 +210,9 @@ class FileExplorer:
     # Internals
     # ------------------------------------------------------------------ #
     def _is_visible(self, name: str) -> bool:
-        if name in self.IGNORED_NAMES:
+        if name in self.ALWAYS_IGNORED_NAMES:
+            return False
+        if name.endswith(self.ALWAYS_IGNORED_SUFFIXES):
             return False
         if name.startswith("."):
             return self.show_hidden
