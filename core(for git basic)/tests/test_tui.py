@@ -2,7 +2,13 @@ import curses
 import os
 import unittest
 
-from stdedit.tui import line_number_width, format_status_bar, _get_key
+from stdedit.tui import (
+    _get_key,
+    build_help_lines,
+    is_help_toggle,
+    line_number_width,
+    format_status_bar,
+)
 from stdedit.languages.schema import language_label
 
 
@@ -126,6 +132,54 @@ class TestGetKey(unittest.TestCase):
 
     def test_curses_error_reports_none(self):
         self.assertIsNone(_get_key(self._S([curses.error("no input")])))
+
+
+class TestHelpContent(unittest.TestCase):
+    def test_documents_every_binding(self):
+        text = "\n".join(build_help_lines(200))
+        for token in (
+            "Ctrl-Space", "Ctrl-C", "Ctrl-X", "Ctrl-V", "Ctrl-Z",
+            "Ctrl-Y", "Ctrl-S", "Ctrl-O", "Ctrl-Q", "Ctrl-E", "Ctrl-H",
+            "F1", "Enter", "Tab", "Backspace", "Home", "End",
+            "h ", "n ", "N ", "O ", "R ",
+        ):
+            self.assertIn(token, text, token)
+
+    def test_covers_all_sections_and_dismissal(self):
+        text = "\n".join(build_help_lines(200))
+        for section in ("EDITING", "SELECTION & CLIPBOARD",
+                        "HISTORY & FILES", "FILE TREE", "HELP"):
+            self.assertIn(section, text)
+        self.assertIn("q / Esc / Enter", text)
+
+    def test_lines_fit_narrow_widths(self):
+        for width in (40, 60, 80):
+            for line in build_help_lines(width):
+                self.assertLessEqual(len(line), width)
+
+
+class TestHelpToggle(unittest.TestCase):
+    def test_raw_ctrl_h_and_f1_work_anywhere(self):
+        for tree_active in (False, True):
+            self.assertTrue(is_help_toggle("\x08", tree_active))
+            self.assertTrue(is_help_toggle(curses.KEY_F1, tree_active))
+
+    def test_backspace_constant_toggles_only_while_tree_focused(self):
+        # On kbs=^H terminals keypad() delivers BOTH Backspace and
+        # Ctrl-H as KEY_BACKSPACE; the guide must not hijack editing.
+        self.assertTrue(is_help_toggle(curses.KEY_BACKSPACE, True))
+        self.assertFalse(is_help_toggle(curses.KEY_BACKSPACE, False))
+
+    def test_raw_ctrl_h_byte_is_the_literal_backspace_char(self):
+        # "\\b" == "\\x08": one byte, so raw Ctrl-H toggles everywhere.
+        self.assertEqual("\b", "\x08")
+        self.assertTrue(is_help_toggle("\x08", False))
+
+    def test_normal_keys_never_toggle(self):
+        for key in ("a", "\n", "\r", "\x1b", curses.KEY_DOWN,
+                    curses.KEY_RESIZE):
+            self.assertFalse(is_help_toggle(key, True))
+            self.assertFalse(is_help_toggle(key, False))
 
 
 class TestPrompts(unittest.TestCase):

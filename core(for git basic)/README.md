@@ -65,6 +65,14 @@ Inside the editor the tree keys **O** / **R** pick a project root via the
 system folder picker (zenity/kdialog) and reveal the current root in the
 desktop's file manager (xdg-open), falling back gracefully when absent.
 
+## Keys
+
+Press **Ctrl-H** (or **F1**) inside the editor for the built-in guide —
+every keybinding with descriptions, grouped by area; close it with `q`,
+`Esc`, or `Enter`. On terminals that merge Ctrl-H with Backspace, F1
+always works, and Backspace opens the guide while the file tree is
+focused.
+
 ## Run tests
 
 ```bash

@@ -161,6 +161,13 @@ python -m stdedit.main docker-compose.yml
   `carl deps` checks the optional OS helpers (zenity/kdialog/xdg-open)
   and `--fix` installs missing ones via apt/dnf/yum/pacman/zypper/apk/
   brew — Python itself needs zero packages (stdlib-only pledge).
+- **Help guide**: Ctrl-H (raw \x08) or F1 opens a full-screen overlay
+  listing every keybinding with descriptions; q/Esc/Enter close it,
+  other keys are swallowed while open. On terminals whose terminfo
+  merges Ctrl-H with Backspace (kbs=^H), the translated KEY_BACKSPACE
+  opens the guide only while the tree is focused so editing is never
+  hijacked — F1 covers the editor everywhere. Boot status hint
+  advertises "Ctrl-H help".
 
 The tree shows only working project files: IDE metadata (.idea/.vscode),
 VCS internals (.git), dependency dirs (node_modules/venv), caches
