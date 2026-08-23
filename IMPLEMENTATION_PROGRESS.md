@@ -63,8 +63,16 @@ make proof
 ### Phase 2: Enhanced Navigation and Search (High Priority)
 - [ ] Implement search functionality in `search.py`
 - [ ] Add jump-to-line capability (`Gg` or `:line_number`)
-- [ ] Add file explorer module (`explorer.py`)
+- [x] Add file explorer module (`explorer.py`) — parent-rooted tree,
+      `<..>` navigation, hidden-file toggle (`h`), open-file highlight,
+      dirty-guarded opening, Left/Right expand/collapse, Tab/Esc focus
 - [ ] Implement buffer management (multiple open files)
+
+#### Shell polish completed alongside the explorer
+- Status bar rewritten as pure `format_status_bar()`: file name + dirty
+  marker, human-readable type label (`[Python]`, `[C++]`, ...), cursor
+  position and scroll percentage
+- **Ctrl-O**: open any file by typed path through the same safe loader
 
 ### Phase 3: Vim-like Features (Medium Priority)
 - [ ] Create `vim_mode.py` extension
@@ -124,7 +132,16 @@ python -m stdedit.main docker-compose.yml
 - **Ctrl-V**: Paste
 - **Arrow keys**: Navigate
 - **Home/End**: Line start/end
-- **Tab**: Insert tab/indent
+- **Tab**: Insert tab/indent (returns focus to editor when the tree is active)
+
+#### File tree (Ctrl-E to open/close; focus keys while the panel is active)
+
+- **Ctrl-E**: Toggle explorer panel / return focus to editor
+- **Up/Down**: Move selection in the tree
+- **Enter**: Open file / expand-collapse folder / follow `<..>` to parent
+- **Right / Left**: Expand / collapse folder (Left climbs up when collapsed)
+- **h**: Show or hide dotfiles
+- **Ctrl-O**: Open a file by typed path (supports `~`)
 
 ## Project Statistics
 
