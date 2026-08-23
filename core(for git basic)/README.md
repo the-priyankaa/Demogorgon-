@@ -11,7 +11,7 @@ Python standard library. Built for [hackathon] Track A.
 ## Quick start
 
 After installing the package (`.venv/bin/pip install -e .`) the editor is
-available as the `stdedit` command:
+available as the `stdedit` command — and as the `cli2` alias launcher:
 
 ```bash
 stdedit path/to/file.py        # edit a file (tree roots at its folder)
