@@ -1,7 +1,8 @@
+import curses
 import os
 import unittest
 
-from stdedit.tui import line_number_width, format_status_bar
+from stdedit.tui import line_number_width, format_status_bar, _get_key
 from stdedit.languages.schema import language_label
 
 
@@ -101,6 +102,30 @@ class TestTreeRoot(unittest.TestCase):
         self.assertEqual(resolve_tree_root(None, None), ".")
         # A filename that does not exist on disk behaves like no file.
         self.assertEqual(resolve_tree_root("/no/such/f.py", None), ".")
+
+
+class TestGetKey(unittest.TestCase):
+    """Physical Enter must be readable as "\\n" (curses.KEY_ENTER bug)."""
+
+    class _S:
+        def __init__(self, keys):
+            self._keys = iter(keys)
+
+        def get_wch(self):
+            k = next(self._keys)
+            if isinstance(k, Exception):
+                raise k
+            return k
+
+    def test_keypad_enter_is_normalized_to_newline(self):
+        self.assertEqual(_get_key(self._S([curses.KEY_ENTER])), "\n")
+
+    def test_regular_keys_pass_through_untouched(self):
+        for raw in ("\r", "\n", "a", "?", curses.KEY_UP, curses.KEY_F1):
+            self.assertEqual(_get_key(self._S([raw])), raw)
+
+    def test_curses_error_reports_none(self):
+        self.assertIsNone(_get_key(self._S([curses.error("no input")])))
 
 
 class TestPrompts(unittest.TestCase):

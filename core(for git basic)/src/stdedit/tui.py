@@ -252,9 +252,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         meter.frame_end(frame_started)
         status = ""
 
-        try:
-            key = stdscr.get_wch()
-        except curses.error:
+        key = _get_key(stdscr)
+        if key is None:
             continue
 
         editor.status = status
@@ -304,7 +303,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 continue
             elif key == "n":  # new file in the selected directory
                 render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
-                name = _prompt_line(stdscr.get_wch, render, "New file name: ")
+                name = _prompt_line(lambda: _get_key(stdscr), render, "New file name: ")
                 if name:
                     _, error = explorer.create_file(name)
                     status = error or f"Created {name}"
@@ -313,7 +312,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 continue
             elif key == "N":  # new folder in the selected directory
                 render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
-                name = _prompt_line(stdscr.get_wch, render, "New folder name: ")
+                name = _prompt_line(lambda: _get_key(stdscr), render, "New folder name: ")
                 if name:
                     _, error = explorer.create_folder(name)
                     status = error or f"Created folder {name}"
@@ -330,7 +329,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 elif info == "no system picker available":
                     # No desktop helper installed: fall back to typing a path.
                     render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
-                    typed = _prompt_line(stdscr.get_wch, render, "Project folder: ")
+                    typed = _prompt_line(lambda: _get_key(stdscr), render, "Project folder: ")
                     if typed:
                         target = os.path.expanduser(typed.strip())
                         if os.path.isdir(target):
@@ -377,7 +376,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             # else: plain ESC / unrecognized escape sequence — ignored for now
         elif key == "\x0f":  # Ctrl-O: open a file by typed path
             render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
-            target = _prompt_line(stdscr.get_wch, render)
+            target = _prompt_line(lambda: _get_key(stdscr), render)
             if target:
                 language, status = open_file_path(
                     stdscr, buf, explorer,
@@ -391,7 +390,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 status = "Unsaved changes — Ctrl-Q again to force quit, Ctrl-S to save"
                 stdscr.addstr(height - 1, 0, status[: width - 1], curses.A_REVERSE)
                 stdscr.refresh()
-                confirm = stdscr.get_wch()
+                confirm = _get_key(stdscr)
                 if confirm == "\x11":
                     break
                 continue
@@ -493,6 +492,23 @@ def _draw_status_prompt(stdscr, text: str) -> None:
 # ---------------------------------------------------------------------- #
 # Prompts (testable: they take read_key/render callables, not raw curses)
 # ---------------------------------------------------------------------- #
+def _get_key(stdscr):
+    """Read one key with curses keypad-Enter normalized to "\\n".
+
+    With keypad(True) enabled, real terminals report the physical Enter
+    key as curses.KEY_ENTER rather than "\\n"/"\\r".  Normalizing here
+    means every consumer (main loop, tree handler, prompts) sees a plain
+    newline.  Returns None when curses reports no readable input.
+    """
+    try:
+        key = stdscr.get_wch()
+    except curses.error:
+        return None
+    if key == curses.KEY_ENTER:
+        return "\n"
+    return key
+
+
 def _unsaved_changes_prompt(read_key, render=None) -> str:
     """Ask what to do about unsaved changes. Returns 'save'|'discard'|'cancel'."""
     if render is not None:
@@ -539,7 +555,7 @@ def open_file_path(stdscr, buf: Buffer, explorer: Optional[FileExplorer], path: 
     """
     current_language = schema.detect_language(buf.filename or "")
     if buf.modified:
-        choice = _unsaved_changes_prompt(stdscr.get_wch, render_unsaved)
+        choice = _unsaved_changes_prompt(lambda: _get_key(stdscr), render_unsaved)
         if choice == "save":
             try:
                 buf.save()
