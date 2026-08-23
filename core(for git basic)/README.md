@@ -8,10 +8,24 @@ Python standard library. Built for [hackathon] Track A.
 - Regex-based syntax highlighting infrastructure; the current core ships Python and leaves additional language packs to the language layer.
 - Full substitution log: see [`STDLIB.md`](./STDLIB.md).
 
+## Install
+
+`carl` sets the editor up on a machine in one shot — venv, editable
+install, and global launchers (`stdedit`, `yuki`, `carl`) in
+`~/.local/bin`:
+
+```bash
+make install        # or: PYTHONPATH=src python3 -m stdedit.install install
+```
+
+Rerunning it is safe: it repairs/refreshes the links and picks up code
+changes. Inspect the installation with `carl status`; remove it again
+with `make uninstall` (add `--purge` to also delete `.venv`).
+
 ## Quick start
 
-After installing the package (`.venv/bin/pip install -e .`) the editor is
-available as the `stdedit` command — and as the `yuki` alias launcher:
+The editor is available as the `stdedit` command — and as the `yuki`
+alias launcher:
 
 ```bash
 stdedit path/to/file.py        # edit a file (tree roots at its folder)

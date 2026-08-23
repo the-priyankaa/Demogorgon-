@@ -147,11 +147,17 @@ python -m stdedit.main docker-compose.yml
 - **R**: Reveal the tree root in the system file manager (xdg-open/open)
 - **h**: Show or hide dotfiles (IDE/build artifacts stay hidden regardless)
 - **Ctrl-O**: Open a file by typed path (supports `~`)
-- **CLI**: installed as the `stdedit` command (editable install in
-  `.venv`, symlinked to `~/.local/bin`). The positional argument is
-  smart: a directory opens as a project, anything else is the file to
-  edit. `--project DIR` roots the tree explicitly (precedence:
-  --project > positional dir > opened file's parent > cwd).
+- **CLI**: installed as the `stdedit` command — with the `yuki` alias
+  launcher (editable install in `.venv`, symlinked to `~/.local/bin`).
+  The positional argument is smart: a directory opens as a project,
+  anything else is the file to edit. `--project DIR` roots the tree
+  explicitly (precedence: --project > positional dir > opened file's
+  parent > cwd).
+- **Installer**: `carl` (`stdedit.install`) sets the editor up on a
+  machine in one shot — venv, editable pip install, and `stdedit` /
+  `yuki` / `carl` symlinks in `~/.local/bin`, then self-checks each
+  launcher. Idempotent; `carl uninstall [--purge]` removes it again;
+  `make install` / `make uninstall` wrap the same flow.
 
 The tree shows only working project files: IDE metadata (.idea/.vscode),
 VCS internals (.git), dependency dirs (node_modules/venv), caches
