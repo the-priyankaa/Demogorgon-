@@ -168,6 +168,14 @@ python -m stdedit.main docker-compose.yml
   opens the guide only while the tree is focused so editing is never
   hijacked — F1 covers the editor everywhere. Boot status hint
   advertises "Ctrl-H help".
+- **Bug-sweep fixes** (pty-verified): prompts accept the translated
+  KEY_BACKSPACE (Backspace was dead in every typed prompt on
+  xterm-family terminals); printable keys are swallowed while the tree
+  has focus instead of silently typing into the document; opening a
+  file inside the current project root keeps that root (expands
+  ancestors + highlights the file) instead of re-rooting at the file's
+  folder; failed opens keep tree focus; help overlay clamps to
+  ultra-narrow terminals.
 
 The tree shows only working project files: IDE metadata (.idea/.vscode),
 VCS internals (.git), dependency dirs (node_modules/venv), caches
