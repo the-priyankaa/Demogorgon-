@@ -39,6 +39,11 @@ class ExplorerTestBase(unittest.TestCase):
 
 
 class TestTreeBuilding(ExplorerTestBase):
+    def test_tree_visible_and_focused_by_default(self):
+        e = FileExplorer(self.root)
+        self.assertTrue(e.visible)
+        self.assertTrue(e.active)
+
     def test_dirs_listed_before_files_sorted_case_insensitive(self):
         e = FileExplorer(self.root)
         names = [os.path.basename(p) for p in self.paths(e) if p != PARENT]

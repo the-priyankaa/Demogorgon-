@@ -180,6 +180,8 @@ def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extens
         status = f"Loaded extensions: {', '.join(loaded)}" if loaded else ""
         if extension_errors:
             status = (status + "  " if status else "") + f"{len(extension_errors)} extension error(s)"
+        hint = "File tree active — Enter opens file/folder, Esc to focus editor"
+        status = (status + "   " if status else "") + hint
         _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer)
     finally:
         extensions.shutdown()

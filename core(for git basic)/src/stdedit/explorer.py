@@ -31,8 +31,10 @@ class FileExplorer:
         # The parent pseudo entry uses the literal ".." path.
         self.items: List[Item] = []
         self.selected_idx = 0
-        self.visible = False
-        self.active = False
+        # The tree is part of the default layout: shown and focused on
+        # launch. Esc/Tab moves focus to the editor; Ctrl-E hides the panel.
+        self.visible = True
+        self.active = True
         self.show_hidden = False
         self.current_path: Optional[str] = None
         self.refresh()
