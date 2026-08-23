@@ -10,6 +10,7 @@ save -> exit end to end.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from .buffer import Buffer
@@ -23,6 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="A zero-dependency terminal text editor (stdlib only).",
     )
     parser.add_argument("file", nargs="?", default=None, help="File to open")
+    parser.add_argument(
+        "--project",
+        default=None,
+        metavar="DIR",
+        help="Folder the file tree is rooted at (default: opened file's parent or cwd)",
+    )
     parser.add_argument(
         "--tab-size", type=int, default=4, help="Tab width in spaces (default: 4)"
     )
@@ -67,6 +74,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
 
+    project_dir = None
+    if args.project:
+        candidate = os.path.abspath(os.path.expanduser(args.project))
+        if not os.path.isdir(candidate):
+            print(f"stdedit: --project: not a directory: {args.project}", file=sys.stderr)
+            return 2
+        project_dir = candidate
+
     if args.list_extensions:
         dirs = extension_dirs()
         print("Extension directories:")
@@ -104,6 +119,7 @@ def main(argv=None) -> int:
         extension_names=extension_names,
         extension_files=extension_files,
         load_all_extensions=args.all_extensions,
+        project_dir=project_dir,
     )
     return 0
 

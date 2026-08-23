@@ -142,8 +142,13 @@ python -m stdedit.main docker-compose.yml
 - **Right / Left**: Expand / collapse folder (Left climbs up when collapsed)
 - **n**: Create a new file in the selected directory (status-line prompt)
 - **N**: Create a new folder in the selected directory (status-line prompt)
+- **O**: Choose a project root via the system folder picker (zenity/kdialog;
+  typed-path fallback when no helper is installed)
+- **R**: Reveal the tree root in the system file manager (xdg-open/open)
 - **h**: Show or hide dotfiles (IDE/build artifacts stay hidden regardless)
 - **Ctrl-O**: Open a file by typed path (supports `~`)
+- **CLI**: `--project DIR` roots the tree at an explicit project folder
+  (precedence: --project > opened file's parent > cwd)
 
 The tree shows only working project files: IDE metadata (.idea/.vscode),
 VCS internals (.git), dependency dirs (node_modules/venv), caches

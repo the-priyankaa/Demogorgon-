@@ -20,6 +20,18 @@ or directly:
 PYTHONPATH=src python3 -m stdedit.main path/to/file.py
 ```
 
+Open a whole project folder — the file tree is rooted there:
+
+```bash
+make run ARGS="--project /path/to/project"
+# or combined with a file:
+PYTHONPATH=src python3 -m stdedit.main --project /path/to/project src/x.py
+```
+
+Inside the editor the tree keys **O** / **R** pick a project root via the
+system folder picker (zenity/kdialog) and reveal the current root in the
+desktop's file manager (xdg-open), falling back gracefully when absent.
+
 ## Run tests
 
 ```bash

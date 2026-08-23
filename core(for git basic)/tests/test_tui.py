@@ -69,6 +69,40 @@ class TestStatusBar(unittest.TestCase):
         self.assertIn("[MATCH 8:10]", line)
 
 
+class TestTreeRoot(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = self._tmp.name
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_project_dir_wins_over_everything(self):
+        from stdedit.tui import resolve_tree_root
+
+        self.assertEqual(
+            resolve_tree_root("some/missing/file.py", self.tmp),
+            os.path.abspath(self.tmp),
+        )
+
+    def test_opened_file_parent_is_default(self):
+        from stdedit.tui import resolve_tree_root
+
+        target = os.path.join(self.tmp, "f.py")
+        with open(target, "w") as f:
+            f.write("x\n")
+        self.assertEqual(resolve_tree_root(target, None), self.tmp)
+
+    def test_cwd_fallback_without_file_or_project(self):
+        from stdedit.tui import resolve_tree_root
+
+        self.assertEqual(resolve_tree_root(None, None), ".")
+        # A filename that does not exist on disk behaves like no file.
+        self.assertEqual(resolve_tree_root("/no/such/f.py", None), ".")
+
+
 class TestPrompts(unittest.TestCase):
     def test_unsaved_prompt_choices(self):
         from stdedit.tui import _unsaved_changes_prompt

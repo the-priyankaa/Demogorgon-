@@ -35,6 +35,7 @@ from .languages import schema
 from .perf import PerfMeter
 from .extensions import ExtensionAPI, load_extensions, load_requested_extensions
 from .explorer import FileExplorer
+from . import filemanager
 
 _COLOR_PAIRS = {
     "keyword": 1,
@@ -62,9 +63,9 @@ class EditorContext:
         self.quit_requested = False
 
 
-def run(buf: Buffer, load_user_extensions: bool = False, extension_names=None, extension_files=None, load_all_extensions: bool = False) -> None:
+def run(buf: Buffer, load_user_extensions: bool = False, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
     """Entry point. Wraps curses so the terminal is restored on crash/exit."""
-    curses.wrapper(_curses_main, buf, load_user_extensions, extension_names or [], extension_files or [], load_all_extensions)
+    curses.wrapper(_curses_main, buf, load_user_extensions, extension_names or [], extension_files or [], load_all_extensions, project_dir)
 
 
 def _init_colors() -> None:
@@ -139,7 +140,7 @@ def _read_bracketed_paste(stdscr) -> str:
             return "".join(content)
 
 
-def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extension_names=None, extension_files=None, load_all_extensions: bool = False) -> None:
+def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
     """
     TEMPORARY minimal UI — just enough to test buffer.py interactively.
     Person A will replace this with the real thing (line numbers, status
@@ -163,9 +164,10 @@ def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extens
     meter = PerfMeter(interval=0.5)
     editor = EditorContext(buf, stdscr)
     explorer = FileExplorer(".")
+    root_dir = resolve_tree_root(buf.filename, project_dir)
+    if root_dir != ".":
+        explorer.set_root(root_dir)
     if buf.filename and os.path.isfile(buf.filename):
-        # Root the tree at the opened file's parent folder.
-        explorer.set_root(os.path.dirname(os.path.abspath(buf.filename)))
         explorer.current_path = os.path.abspath(buf.filename)
     extensions = ExtensionAPI(editor)
     if load_all_extensions or load_user_extensions:
@@ -318,6 +320,33 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                     if not error and name.startswith("."):
                         status += " (hidden — press h to show)"
                 continue
+            elif key == "O":  # choose a project root via the system picker
+                picked, info = filemanager.pick_folder(explorer.root_dir)
+                if picked:
+                    explorer.set_root(picked)
+                    status = f"Project root: {picked}"
+                elif info == "cancelled":
+                    status = "Cancelled"
+                elif info == "no system picker available":
+                    # No desktop helper installed: fall back to typing a path.
+                    render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
+                    typed = _prompt_line(stdscr.get_wch, render, "Project folder: ")
+                    if typed:
+                        target = os.path.expanduser(typed.strip())
+                        if os.path.isdir(target):
+                            explorer.set_root(target)
+                            status = f"Project root: {target}"
+                        else:
+                            status = f"Not a directory: {target}"
+                    else:
+                        status = "Cancelled"
+                else:
+                    status = f"Folder picker failed: {info}"
+                continue
+            elif key == "R":  # reveal the tree root in the system file manager
+                opened, info = filemanager.reveal_in_file_manager(explorer.root_dir)
+                status = f"Opened in {info}" if opened else f"Reveal failed: {info}"
+                continue
             elif key in ("\t", "\x05", "\x1b"):  # Tab / Ctrl-E / Esc -> editor
                 explorer.active = False
                 status = ""
@@ -437,6 +466,18 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 def line_number_width(line_count: int) -> int:
     """Return the number of columns needed for 1-indexed line numbers."""
     return max(2, len(str(max(1, line_count))))
+
+
+def resolve_tree_root(filename, project_dir) -> str:
+    """Decide which folder the file tree is rooted at.
+
+    Precedence: explicit --project folder > opened file's parent > cwd.
+    """
+    if project_dir:
+        return os.path.abspath(project_dir)
+    if filename and os.path.isfile(filename):
+        return os.path.dirname(os.path.abspath(filename))
+    return "."
 
 
 def _draw_status_prompt(stdscr, text: str) -> None:
