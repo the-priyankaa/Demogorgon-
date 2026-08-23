@@ -310,7 +310,9 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                             stdscr, buf, explorer, path,
                             render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
                         )
-                        explorer.active = False
+                        if status.startswith("Opened"):
+                            explorer.active = False  # hand focus to the editor
+                        # On failure keep tree focus so the user can retry.
                 continue
             elif key == "h":  # toggle hidden files in the tree
                 explorer.toggle_hidden()
@@ -701,7 +703,24 @@ def open_file_path(stdscr, buf: Buffer, explorer: Optional[FileExplorer], path: 
     language = schema.detect_language(buf.filename or "")
     if explorer is not None:
         abs_path = os.path.abspath(path)
-        explorer.set_root(os.path.dirname(abs_path))
+        parent = os.path.dirname(abs_path)
+        try:
+            inside = os.path.commonpath([explorer.root_dir, abs_path]) == explorer.root_dir
+        except ValueError:  # e.g. unrelated Windows drives
+            inside = False
+        if inside:
+            # The file lives inside the current tree (typical when a
+            # project root was given): keep that root and just reveal
+            # the file — expand its ancestors, refresh, highlight it.
+            node = parent
+            while node != explorer.root_dir and len(node) > len(explorer.root_dir):
+                explorer.expanded_dirs.add(node)
+                node = os.path.dirname(node)
+            explorer.refresh()
+            explorer._select_path(abs_path)
+        else:
+            # Outside the current tree: re-root at the file's folder.
+            explorer.set_root(parent)
         explorer.current_path = abs_path
     return language, f"Opened {path}"
 

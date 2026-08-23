@@ -279,6 +279,56 @@ class TestSafeOpen(unittest.TestCase):
         self.assertEqual(explorer.current_path, os.path.abspath(self.target))
         self.assertEqual(explorer.root_dir, os.path.abspath(self._tmp.name))
 
+    def _write(self, relpath, content):
+        path = os.path.join(self._tmp.name, relpath)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(content)
+        return path
+
+    def test_open_inside_project_keeps_root_and_selects_file(self):
+        from stdedit.buffer import Buffer
+        from stdedit.explorer import FileExplorer
+        from stdedit.tui import open_file_path
+
+        marker = self._write("marker.txt", "m\n")
+        nested = self._write(os.path.join("sub", "deep.txt"), "deep\n")
+
+        explorer = FileExplorer(self._tmp.name)
+        buf = Buffer()
+        language, status = open_file_path(None, buf, explorer, nested)
+
+        self.assertTrue(status.startswith("Opened "))
+        # The project root stays pinned -- no jump into sub/.
+        self.assertEqual(explorer.root_dir, os.path.abspath(self._tmp.name))
+        # Root-level content is still listed; sub/ got expanded.
+        listed = [item[2] for item in explorer.items]
+        self.assertIn(os.path.abspath(marker), listed)
+        self.assertIn(os.path.abspath(nested), listed)
+        self.assertIn(os.path.abspath(os.path.dirname(nested)),
+                      explorer.expanded_dirs)
+        # And the opened file is highlighted in the tree.
+        self.assertEqual(explorer.current_path, os.path.abspath(nested))
+        selected = explorer.get_selected()
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected[2], os.path.abspath(nested))
+
+    def test_open_outside_project_reroots_at_parent(self):
+        from stdedit.buffer import Buffer
+        from stdedit.explorer import FileExplorer
+        from stdedit.tui import open_file_path
+
+        proj = os.path.join(self._tmp.name, "proj")
+        os.mkdir(proj)
+        stray = self._write("stray.txt", "outside\n")
+
+        explorer = FileExplorer(proj)
+        language, status = open_file_path(None, Buffer(), explorer, stray)
+
+        self.assertTrue(status.startswith("Opened "))
+        self.assertEqual(explorer.root_dir, os.path.abspath(self._tmp.name))
+        self.assertEqual(explorer.current_path, os.path.abspath(stray))
+
     def test_modified_buffer_discard_choice_loads_new_file(self):
         from stdedit.buffer import Buffer
         from stdedit.tui import open_file_path
