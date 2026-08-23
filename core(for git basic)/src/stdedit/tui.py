@@ -300,6 +300,24 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             elif key == "h":  # toggle hidden files in the tree
                 explorer.toggle_hidden()
                 continue
+            elif key == "n":  # new file in the selected directory
+                render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
+                name = _prompt_line(stdscr.get_wch, render, "New file name: ")
+                if name:
+                    _, error = explorer.create_file(name)
+                    status = error or f"Created {name}"
+                    if not error and name.startswith("."):
+                        status += " (hidden — press h to show)"
+                continue
+            elif key == "N":  # new folder in the selected directory
+                render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
+                name = _prompt_line(stdscr.get_wch, render, "New folder name: ")
+                if name:
+                    _, error = explorer.create_folder(name)
+                    status = error or f"Created folder {name}"
+                    if not error and name.startswith("."):
+                        status += " (hidden — press h to show)"
+                continue
             elif key in ("\t", "\x05", "\x1b"):  # Tab / Ctrl-E / Esc -> editor
                 explorer.active = False
                 status = ""

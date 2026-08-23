@@ -108,6 +108,93 @@ class FileExplorer:
             self.selected_idx = max(0, min(len(self.items) - 1, self.selected_idx + dy))
 
     # ------------------------------------------------------------------ #
+    # Creation
+    # ------------------------------------------------------------------ #
+    def selected_directory(self) -> str:
+        """Directory where new entries created from the tree are placed.
+
+        A selected directory receives the entry inside itself; a selected
+        file gets it as a sibling; `<..>` or an empty tree falls back to
+        the tree root.
+        """
+        selected = self.get_selected()
+        if not selected:
+            return self.root_dir
+        _, _, path, is_dir = selected
+        if path == PARENT:
+            return self.root_dir
+        if is_dir:
+            return path
+        return os.path.dirname(path)
+
+    @staticmethod
+    def _validate_entry_name(name: str) -> Optional[str]:
+        """Return an error message for an invalid entry name, else None."""
+        if not name:
+            return "Name cannot be empty"
+        if name in (".", ".."):
+            return f"Invalid name: {name}"
+        seps = {os.sep}
+        if os.altsep:
+            seps.add(os.altsep)
+        if "/" in name or any(sep in name for sep in seps):
+            return "Name must be a single path component"
+        return None
+
+    def _select_path(self, path: str) -> None:
+        for i, item in enumerate(self.items):
+            if item[2] == path:
+                self.selected_idx = i
+                return
+
+    def create_file(self, name: str) -> Tuple[str, Optional[str]]:
+        """Create an empty file in the target directory.
+
+        Returns (path, error). On success the parent folder is expanded,
+        the tree refreshed and the new file selected.
+        """
+        name = name.strip()
+        error = self._validate_entry_name(name)
+        if error:
+            return "", error
+        base = self.selected_directory()
+        path = os.path.join(base, name)
+        try:
+            with open(path, "x"):
+                pass
+        except FileExistsError:
+            return path, f"'{name}' already exists"
+        except OSError as exc:
+            return path, f"Cannot create file: {exc}"
+        self.expanded_dirs.add(base)
+        self.refresh()
+        self._select_path(path)
+        return path, None
+
+    def create_folder(self, name: str) -> Tuple[str, Optional[str]]:
+        """Create a directory in the target directory.
+
+        Returns (path, error). On success the new folder is expanded and
+        selected.
+        """
+        name = name.strip()
+        error = self._validate_entry_name(name)
+        if error:
+            return "", error
+        base = self.selected_directory()
+        path = os.path.join(base, name)
+        try:
+            os.mkdir(path)
+        except FileExistsError:
+            return path, f"'{name}' already exists"
+        except OSError as exc:
+            return path, f"Cannot create folder: {exc}"
+        self.expanded_dirs.add(path)
+        self.refresh()
+        self._select_path(path)
+        return path, None
+
+    # ------------------------------------------------------------------ #
     # Internals
     # ------------------------------------------------------------------ #
     def _is_visible(self, name: str) -> bool:

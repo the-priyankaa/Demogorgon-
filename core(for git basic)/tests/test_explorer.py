@@ -132,6 +132,79 @@ class TestRootingAndNavigation(ExplorerTestBase):
         self.assertIn("inner.txt", " ".join(it[1] for it in e.items))
 
 
+class TestCreation(ExplorerTestBase):
+    def test_selected_directory_matrix(self):
+        e = FileExplorer(self.root)
+        # Nothing meaningful selected -> root. (<..> is selected at index 0.)
+        self.assertEqual(e.selected_directory(), os.path.abspath(self.root))
+        e.selected_idx = 0  # <..> entry
+        self.assertEqual(e.selected_directory(), os.path.abspath(self.root))
+        # Directory selected -> inside it.
+        sub_one = os.path.join(self.root, "sub_one")
+        idx = [i for i, it in enumerate(e.items) if it[2] == os.path.abspath(sub_one)][0]
+        e.selected_idx = idx
+        self.assertEqual(e.selected_directory(), os.path.abspath(sub_one))
+        # File selected -> its containing folder.
+        alpha = os.path.join(self.root, "alpha.txt")
+        idx = [i for i, it in enumerate(e.items) if it[2] == alpha][0]
+        e.selected_idx = idx
+        self.assertEqual(e.selected_directory(), os.path.abspath(self.root))
+
+    def test_create_file_creates_selects_and_expands(self):
+        e = FileExplorer(self.root)
+        path, error = e.create_file("newmod.py")
+        self.assertIsNone(error)
+        self.assertTrue(os.path.isfile(path))
+        self.assertEqual(os.path.getsize(path), 0)
+        self.assertEqual(e.get_selected()[2], os.path.abspath(path))
+
+    def test_create_file_inside_selected_folder(self):
+        e = FileExplorer(self.root)
+        sub_one = os.path.join(self.root, "sub_one")
+        idx = [i for i, it in enumerate(e.items) if it[2] == os.path.abspath(sub_one)][0]
+        e.selected_idx = idx
+        path, error = e.create_file("deep.txt")
+        self.assertIsNone(error)
+        self.assertEqual(path, os.path.join(sub_one, "deep.txt"))
+
+    def test_create_file_duplicate_rejected(self):
+        e = FileExplorer(self.root)
+        _, first_error = e.create_file("dup.txt")
+        self.assertIsNone(first_error)
+        _, error = e.create_file("dup.txt")
+        self.assertIn("already exists", error)
+
+    def test_create_file_invalid_names_rejected(self):
+        e = FileExplorer(self.root)
+        for bad in ("", "   ", "a/b", "..", ".", "x/y/z"):
+            _, error = e.create_file(bad)
+            self.assertIsNotNone(error, f"expected rejection for {bad!r}")
+
+    def test_create_folder_creates_expands_and_selects(self):
+        e = FileExplorer(self.root)
+        path, error = e.create_folder("newdir")
+        self.assertIsNone(error)
+        self.assertTrue(os.path.isdir(path))
+        # Selected on the new folder and expanded: creating inside works.
+        self.assertEqual(e.get_selected()[2], os.path.abspath(path))
+        inner_path, inner_error = e.create_file("inner.md")
+        self.assertIsNone(inner_error)
+        self.assertEqual(
+            inner_path, os.path.join(path, "inner.md"),
+            "new folder should be the creation target after being selected",
+        )
+
+    def test_create_folder_duplicate_rejected(self):
+        e = FileExplorer(self.root)
+        _, first_error = e.create_folder("twice")
+        self.assertIsNone(first_error)
+        # Move selection off the new folder so the target is the root again.
+        alpha = os.path.join(self.root, "alpha.txt")
+        e._select_path(alpha)
+        _, error = e.create_folder("twice")
+        self.assertIn("already exists", error)
+
+
 class TestSelection(ExplorerTestBase):
     def test_move_selection_clamps_to_bounds(self):
         e = FileExplorer(self.root)
