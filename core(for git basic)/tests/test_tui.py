@@ -1,6 +1,7 @@
 import unittest
 
-from stdedit.tui import line_number_width
+from stdedit.tui import line_number_width, format_status_bar
+from stdedit.languages.schema import language_label
 
 
 class TestLineNumbers(unittest.TestCase):
@@ -13,6 +14,58 @@ class TestLineNumbers(unittest.TestCase):
         self.assertEqual(line_number_width(99), 2)
         self.assertEqual(line_number_width(100), 3)
         self.assertEqual(line_number_width(1000), 4)
+
+
+class TestLanguageLabels(unittest.TestCase):
+    def test_friendly_names(self):
+        self.assertEqual(language_label("python"), "Python")
+        self.assertEqual(language_label("javascript"), "JavaScript")
+        self.assertEqual(language_label("cpp"), "C++")
+        self.assertEqual(language_label("shell"), "Shell")
+        self.assertEqual(language_label("plaintext"), "Text")
+
+    def test_unknown_language_falls_back_to_text(self):
+        self.assertEqual(language_label("made_up_lang"), "Text")
+
+
+class TestStatusBar(unittest.TestCase):
+    def test_shows_filename_and_type(self):
+        line = format_status_bar("main.py", False, "Python", 0, 0, 10)
+        self.assertIn("main.py", line)
+        self.assertIn("[Python]", line)
+        self.assertIn("Ln 1, Col 1", line)
+
+    def test_dirty_marker_after_filename(self):
+        line = format_status_bar("main.py", True, "Python", 0, 0, 10)
+        self.assertIn("main.py*", line)
+
+    def test_no_name_when_no_file(self):
+        line = format_status_bar(None, False, "Text", 0, 0, 1)
+        self.assertIn("[No Name]  [Text]", line)
+
+    def test_position_percent(self):
+        # Cursor on line 5 of 10 -> 50%.
+        line = format_status_bar("f.py", False, "Python", 4, 0, 10)
+        self.assertIn("50%", line)
+
+    def test_single_line_file_is_100_percent(self):
+        line = format_status_bar("f.py", False, "Python", 0, 0, 1)
+        self.assertIn("100%", line)
+
+    def test_optional_segments_omitted(self):
+        line = format_status_bar("f.py", False, "Python", 0, 0, 5)
+        self.assertNotIn("[SELECT]", line)
+        self.assertNotIn("[MATCH", line)
+        self.assertNotIn("[LARGE-FILE", line)
+
+    def test_flags_included_when_active(self):
+        line = format_status_bar(
+            "big.log", False, "Text", 3, 2, 100,
+            selecting=True, large_file_mode=True, match_pos=(7, 9),
+        )
+        self.assertIn("[SELECT]", line)
+        self.assertIn("[LARGE-FILE: undo off]", line)
+        self.assertIn("[MATCH 8:10]", line)
 
 
 if __name__ == "__main__":

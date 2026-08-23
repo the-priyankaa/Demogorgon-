@@ -286,6 +286,33 @@ def detect_language(filename: str) -> str:
     return "plaintext"
 
 
+# Human-readable names shown in the status bar.
+LANGUAGE_LABELS: Dict[str, str] = {
+    "plaintext": "Text",
+    "python": "Python",
+    "javascript": "JavaScript",
+    "typescript": "TypeScript",
+    "html": "HTML",
+    "css": "CSS",
+    "c": "C",
+    "cpp": "C++",
+    "java": "Java",
+    "rust": "Rust",
+    "go": "Go",
+    "json": "JSON",
+    "yaml": "YAML",
+    "markdown": "Markdown",
+    "shell": "Shell",
+    "sql": "SQL",
+    "xml": "XML",
+}
+
+
+def language_label(language: str) -> str:
+    """Return the display name for a language id ('python' -> 'Python')."""
+    return LANGUAGE_LABELS.get(language, "Text")
+
+
 def tokenize(line: str, language: str) -> List[TokenSpan]:
     pattern = _compiled_pattern(language)
     if pattern is None:

@@ -216,18 +216,21 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width + explorer_width,
             )
 
-        dirty = "*" if buf.modified else ""
-        sel_flag = " [SELECT]" if selecting else ""
-        large_flag = " [LARGE-FILE: undo off]" if buf.large_file_mode else ""
         match = buf.matching_bracket()
-        match_flag = f" [MATCH {match[0]+1}:{match[1]+1}]" if match else ""
-        ext_status = extensions.status()
-        info = (
-            f"{buf.filename or '[No Name]'}{dirty}  "
-            f"[{language}]  Ln {buf.cursor_y+1}, Col {buf.cursor_x+1}{sel_flag}{large_flag}{match_flag}  "
-            f"{meter.label()}"
-        )
-        status_line = (info + ("   " + ext_status if ext_status else "") + "   " + status)[: width - 1]
+        status_line = format_status_bar(
+            filename=buf.filename,
+            modified=buf.modified,
+            label=schema.language_label(language),
+            cursor_y=buf.cursor_y,
+            cursor_x=buf.cursor_x,
+            line_count=len(buf.lines),
+            selecting=selecting,
+            large_file_mode=buf.large_file_mode,
+            match_pos=match,
+            meter_label=meter.label(),
+            extension_status=extensions.status(),
+            transient_status=status,
+        )[: width - 1]
         try:
             stdscr.addstr(height - 1, 0, status_line, curses.A_REVERSE)
         except curses.error:
@@ -383,6 +386,47 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 def line_number_width(line_count: int) -> int:
     """Return the number of columns needed for 1-indexed line numbers."""
     return max(2, len(str(max(1, line_count))))
+
+
+def format_status_bar(
+    filename,
+    modified,
+    label,
+    cursor_y,
+    cursor_x,
+    line_count,
+    selecting=False,
+    large_file_mode=False,
+    match_pos=None,
+    meter_label="",
+    extension_status="",
+    transient_status="",
+) -> str:
+    """Build the status bar text.
+
+    Pure function (no curses access) so it can be unit tested. Shows the
+    open file name with a dirty marker, the human-readable file type, cursor
+    position and scroll percentage, plus optional mode/meter/extension info.
+    """
+    name = f"{filename or '[No Name]'}{'*' if modified else ''}"
+    sel_flag = " [SELECT]" if selecting else ""
+    large_flag = " [LARGE-FILE: undo off]" if large_file_mode else ""
+    match_flag = f" [MATCH {match_pos[0]+1}:{match_pos[1]+1}]" if match_pos else ""
+    if line_count > 0:
+        pct = max(0, min(100, round((cursor_y + 1) / line_count * 100)))
+        pct_text = f"  {pct}%"
+    else:
+        pct_text = ""
+    parts = [
+        f"{name}  [{label}]  Ln {cursor_y + 1}, Col {cursor_x + 1}{sel_flag}{large_flag}{match_flag}{pct_text}"
+    ]
+    if meter_label:
+        parts.append(meter_label)
+    if extension_status:
+        parts.append(extension_status)
+    if transient_status:
+        parts.append(transient_status)
+    return "   ".join(parts)
 
 
 def _draw_explorer(stdscr, explorer: FileExplorer, height: int, width: int) -> None:
