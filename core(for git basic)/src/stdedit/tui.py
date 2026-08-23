@@ -163,6 +163,10 @@ def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extens
     meter = PerfMeter(interval=0.5)
     editor = EditorContext(buf, stdscr)
     explorer = FileExplorer(".")
+    if buf.filename and os.path.isfile(buf.filename):
+        # Root the tree at the opened file's parent folder.
+        explorer.set_root(os.path.dirname(os.path.abspath(buf.filename)))
+        explorer.current_path = os.path.abspath(buf.filename)
     extensions = ExtensionAPI(editor)
     if load_all_extensions or load_user_extensions:
         loaded, extension_errors = load_extensions(extensions)
@@ -267,17 +271,23 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 selected = explorer.get_selected()
                 if selected:
                     depth, name, path, is_dir = selected
-                    if is_dir:
+                    if path == "..":
+                        explorer.go_up()
+                    elif is_dir:
                         explorer.toggle_expand(explorer.selected_idx)
                     else:
                         # Open the file
                         try:
                             buf.load(path)
                             language = schema.detect_language(buf.filename or "")
+                            explorer.current_path = os.path.abspath(path)
                             explorer.active = False
                             status = f"Opened {path}"
                         except Exception as e:
                             status = f"Error opening file: {e}"
+                continue
+            elif key == "h":  # toggle hidden files in the tree
+                explorer.toggle_hidden()
                 continue
             elif key == "\x05":  # Ctrl-E - toggle focus back to editor
                 explorer.active = False
@@ -453,6 +463,9 @@ def _draw_explorer(stdscr, explorer: FileExplorer, height: int, width: int) -> N
         attr = curses.A_REVERSE if row == explorer.selected_idx else 0
         if is_dir and row != explorer.selected_idx:
             attr |= curses.A_BOLD
+        elif not is_dir and path == explorer.current_path:
+            # Highlight the file that is currently open in the editor.
+            attr |= curses.A_BOLD | curses.A_UNDERLINE
 
         try:
             stdscr.addstr(i, 0, display.ljust(width - 2)[:width - 2], attr)
