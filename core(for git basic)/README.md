@@ -22,6 +22,18 @@ Rerunning it is safe: it repairs/refreshes the links and picks up code
 changes. Inspect the installation with `carl status`; remove it again
 with `make uninstall` (add `--purge` to also delete `.venv`).
 
+### Dependencies
+
+There are **no Python packages to install** — the editor is standard
+library only. The only hard requirement is Python ≥ 3.9. Optional OS
+helpers (zenity/kdialog for the folder picker, xdg-open for file-manager
+reveal) are checked and can be auto-installed:
+
+```bash
+make deps          # or: carl deps    - report what's present/missing
+make deps-fix      # or: carl deps --fix - install missing helpers
+```
+
 ## Quick start
 
 The editor is available as the `stdedit` command — and as the `yuki`

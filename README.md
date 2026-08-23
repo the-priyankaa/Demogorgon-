@@ -46,6 +46,10 @@ carl status        # inspect what was installed where
 Rerunning is safe: it repairs links and picks up code changes.
 Uninstall with `make uninstall` (`--purge` also deletes `.venv`).
 
+No Python packages are needed (standard library only, Python ≥ 3.9).
+`carl deps` reports the optional OS helpers; `carl deps --fix` installs
+any that are missing via your system package manager.
+
 ## Quick start
 
 ```bash

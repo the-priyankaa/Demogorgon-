@@ -1,4 +1,4 @@
-.PHONY: run test proof clean install uninstall
+.PHONY: run test proof clean install uninstall deps deps-fix
 
 run:
 	PYTHONPATH=src python3 -m stdedit.main $(FILE) $(ARGS)
@@ -18,3 +18,9 @@ install:
 
 uninstall:
 	PYTHONPATH=src python3 -m stdedit.install uninstall
+
+deps:
+	PYTHONPATH=src python3 -m stdedit.install deps
+
+deps-fix:
+	PYTHONPATH=src python3 -m stdedit.install deps --fix

@@ -5,6 +5,8 @@ Usage:
     carl install          same thing, idempotent
     carl uninstall [--purge]
                           remove global launchers; --purge also deletes .venv
+    carl deps [--fix]     check optional OS helpers; --fix installs them
+                          through the detected system package manager
     carl status           report installation health
 
 What 'carl' does on this machine:
@@ -21,6 +23,7 @@ the real system.
 
 import argparse
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -34,6 +37,18 @@ PROBE_ARGS = {
     "yuki": ("--list-extensions",),
     "carl": ("status",),
 }
+
+# System package managers we can drive, in probe order.  Each entry is
+# (manager binary, argv prefix that installs packages non-interactively).
+PACKAGE_MANAGERS = (
+    ("apt-get", ("sudo", "apt-get", "install", "-y")),
+    ("dnf", ("sudo", "dnf", "install", "-y")),
+    ("yum", ("sudo", "yum", "install", "-y")),
+    ("pacman", ("sudo", "pacman", "-S", "--noconfirm")),
+    ("zypper", ("sudo", "zypper", "install", "-y")),
+    ("apk", ("sudo", "apk", "add")),
+    ("brew", ("brew", "install")),  # macOS: never needs sudo
+)
 
 
 # ------------------------------------------------------------------ paths --
@@ -94,6 +109,94 @@ def self_check_ok(runner, link_path, probe=("--help",)):
     except (OSError, subprocess.TimeoutExpired):
         return False
     return getattr(result, "returncode", 1) == 0
+
+
+# ------------------------------------------------- optional OS dependencies --
+def helper_specs(system=None):
+    """(binary, purpose, {manager: package}) for each optional OS helper.
+
+    The editor itself needs no packages beyond Python; these only enable
+    nicer system integration and are probed with graceful fallbacks.
+    """
+    system = system or platform.system()
+    specs = [
+        ("zenity", "native folder picker for tree key O",
+         {"apt-get": "zenity", "dnf": "zenity", "yum": "zenity",
+          "pacman": "zenity", "zypper": "zenity", "apk": "zenity",
+          "brew": "zenity"}),
+        ("kdialog", "KDE folder picker for tree key O",
+         {"apt-get": "kdialog", "dnf": "kdialog", "yum": "kdialog",
+          "pacman": "kdialog", "zypper": "kdialog", "apk": "kdialog",
+          "brew": "kdialog"}),
+    ]
+    if system == "Darwin":
+        specs.append(("open", "reveal tree root in Finder", {}))
+    else:
+        specs.append(("xdg-open", "reveal tree root in the desktop's file manager",
+                      {manager: "xdg-utils" for manager, _ in PACKAGE_MANAGERS
+                       if manager != "brew"}))
+    return specs
+
+
+def detect_package_manager(_which=shutil.which):
+    """First available (name, install-prefix), or None."""
+    for name, prefix in PACKAGE_MANAGERS:
+        if _which(name):
+            return name, prefix
+    return None
+
+
+def cmd_deps(args, root, bin_dir, _which=shutil.which,
+             _run=subprocess.run):
+    error = python_version_error()
+    if error:
+        print(f"carl: {error}")
+        return 1
+
+    print("Python packages: none required - stdedit is standard-library "
+          "only.")
+    missing = []
+    for binary, why, packages in helper_specs():
+        if _which(binary):
+            print(f"[ok]   {binary:<9} {why}")
+        else:
+            print(f"[miss] {binary:<9} {why}")
+            missing.append((binary, why, packages))
+
+    if not missing:
+        print("all optional helpers present.")
+        return 0
+    if not getattr(args, "fix", False):
+        print(f"{len(missing)} optional helper(s) missing - the editor "
+              f"still runs.  Rerun 'carl deps --fix' to install them.")
+        return 1
+
+    manager = detect_package_manager(_which)
+    if manager is None:
+        print("no supported package manager found; install manually:")
+        names = sorted({pkg for _, _, pkgs in missing
+                        for pkg in pkgs.values()})
+        print(f"  {' / '.join(names)}")
+        return 1
+    name, prefix = manager
+    for binary, _, packages in missing:
+        package = packages.get(name)
+        if package is None:
+            print(f"[skip] {binary}: preinstalled on this platform")
+            continue
+        command = [*prefix, package]
+        print(f"$ {' '.join(command)}")
+        result = _run(command)
+        rc = getattr(result, "returncode", 0)
+        print(f"       {'ok' if rc == 0 else f'failed (exit {rc})'}")
+
+    still_missing = [binary for binary, _, _ in missing if not _which(binary)]
+    if still_missing:
+        print(f"still missing after fix attempt: "
+              f"{', '.join(still_missing)}")
+        return 1
+    print("all optional helpers present now.")
+    return 0
 
 
 # ---------------------------------------------------------------- actions --
@@ -238,11 +341,18 @@ def build_parser():
                                help="remove global launcher symlinks")
     uninstall.add_argument("--purge", action="store_true",
                            help="also delete the project's .venv")
+    deps = sub.add_parser(
+        "deps", help="check/install optional OS helpers "
+                     "(zenity, kdialog, xdg-open)")
+    deps.add_argument("--fix", action="store_true",
+                      help="install missing helpers via the system "
+                           "package manager")
     sub.add_parser("status", help="show installation status")
     return parser
 
 
-def main(argv=None, _root=None, _bin_dir=None, _run=subprocess.run):
+def main(argv=None, _root=None, _bin_dir=None, _run=subprocess.run,
+         _which=shutil.which):
     args = build_parser().parse_args(argv)
     root = os.path.abspath(_root or get_project_root())
     bin_dir = _bin_dir or get_bin_dir()
@@ -251,6 +361,8 @@ def main(argv=None, _root=None, _bin_dir=None, _run=subprocess.run):
         return cmd_install(args, root, bin_dir, runner=_run)
     if command == "uninstall":
         return cmd_uninstall(args, root, bin_dir)
+    if command == "deps":
+        return cmd_deps(args, root, bin_dir, _which=_which, _run=_run)
     return cmd_status(args, root, bin_dir)
 
 

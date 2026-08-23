@@ -158,6 +158,9 @@ python -m stdedit.main docker-compose.yml
   `yuki` / `carl` symlinks in `~/.local/bin`, then self-checks each
   launcher. Idempotent; `carl uninstall [--purge]` removes it again;
   `make install` / `make uninstall` wrap the same flow.
+  `carl deps` checks the optional OS helpers (zenity/kdialog/xdg-open)
+  and `--fix` installs missing ones via apt/dnf/yum/pacman/zypper/apk/
+  brew — Python itself needs zero packages (stdlib-only pledge).
 
 The tree shows only working project files: IDE metadata (.idea/.vscode),
 VCS internals (.git), dependency dirs (node_modules/venv), caches
