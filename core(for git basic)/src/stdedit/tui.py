@@ -267,6 +267,18 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             elif key == curses.KEY_DOWN:
                 explorer.move_selection(1)
                 continue
+            elif key == curses.KEY_RIGHT:
+                selected = explorer.get_selected()
+                if selected and selected[3] and selected[2] not in explorer.expanded_dirs:
+                    explorer.toggle_expand(explorer.selected_idx)
+                continue
+            elif key == curses.KEY_LEFT:
+                selected = explorer.get_selected()
+                if selected and selected[3] and selected[2] in explorer.expanded_dirs:
+                    explorer.toggle_expand(explorer.selected_idx)
+                elif explorer.can_go_up():
+                    explorer.go_up()
+                continue
             elif key in ("\n", "\r"):  # Enter - open file or toggle directory
                 selected = explorer.get_selected()
                 if selected:
@@ -276,21 +288,19 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                     elif is_dir:
                         explorer.toggle_expand(explorer.selected_idx)
                     else:
-                        # Open the file
-                        try:
-                            buf.load(path)
-                            language = schema.detect_language(buf.filename or "")
-                            explorer.current_path = os.path.abspath(path)
-                            explorer.active = False
-                            status = f"Opened {path}"
-                        except Exception as e:
-                            status = f"Error opening file: {e}"
+                        # Open the file through the safe (dirty-guarded) path.
+                        language, status = open_file_path(
+                            stdscr, buf, explorer, path,
+                            render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
+                        )
+                        explorer.active = False
                 continue
             elif key == "h":  # toggle hidden files in the tree
                 explorer.toggle_hidden()
                 continue
-            elif key == "\x05":  # Ctrl-E - toggle focus back to editor
+            elif key in ("\t", "\x05", "\x1b"):  # Tab / Ctrl-E / Esc -> editor
                 explorer.active = False
+                status = ""
                 continue
 
         if key == "\x05":  # Ctrl-E - toggle explorer visibility
@@ -316,6 +326,17 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                     buf.paste(pasted)
                     status = f"Pasted {len(pasted)} chars"
             # else: plain ESC / unrecognized escape sequence — ignored for now
+        elif key == "\x0f":  # Ctrl-O: open a file by typed path
+            render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
+            target = _prompt_line(stdscr.get_wch, render)
+            if target:
+                language, status = open_file_path(
+                    stdscr, buf, explorer,
+                    os.path.expanduser(target),
+                    render_unsaved=render,
+                )
+            else:
+                status = "Open cancelled"
         elif key == "\x11":  # Ctrl-Q
             if buf.modified:
                 status = "Unsaved changes — Ctrl-Q again to force quit, Ctrl-S to save"
@@ -396,6 +417,85 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 def line_number_width(line_count: int) -> int:
     """Return the number of columns needed for 1-indexed line numbers."""
     return max(2, len(str(max(1, line_count))))
+
+
+def _draw_status_prompt(stdscr, text: str) -> None:
+    """Render prompt text on the status row (used by interactive prompts)."""
+    height, width = stdscr.getmaxyx()
+    try:
+        stdscr.addstr(height - 1, 0, text[: width - 1].ljust(width - 1), curses.A_REVERSE)
+        stdscr.refresh()
+    except curses.error:
+        pass
+
+
+# ---------------------------------------------------------------------- #
+# Prompts (testable: they take read_key/render callables, not raw curses)
+# ---------------------------------------------------------------------- #
+def _unsaved_changes_prompt(read_key, render=None) -> str:
+    """Ask what to do about unsaved changes. Returns 'save'|'discard'|'cancel'."""
+    if render is not None:
+        render("Unsaved changes — (s)ave, (d)iscard, (c)ancel?")
+    while True:
+        try:
+            k = read_key()
+        except curses.error:
+            continue
+        if isinstance(k, str):
+            if k in ("s", "S"):
+                return "save"
+            if k in ("d", "D"):
+                return "discard"
+            if k in ("c", "C", "\x1b"):
+                return "cancel"
+
+
+def _prompt_line(read_key, render, title: str = "Open file: ") -> Optional[str]:
+    """Minimal single-line prompt. Returns the entered text, or None on cancel."""
+    text = ""
+    while True:
+        render(title + text)
+        try:
+            k = read_key()
+        except curses.error:
+            continue
+        if k in ("\n", "\r"):
+            return text.strip() or None
+        if k == "\x1b":
+            return None
+        if k in ("\x7f", "\b"):
+            text = text[:-1]
+        elif isinstance(k, str) and k.isprintable():
+            text += k
+
+
+def open_file_path(stdscr, buf: Buffer, explorer: Optional[FileExplorer], path: str, render_unsaved=None) -> Tuple[str, str]:
+    """Safely open `path` into the buffer.
+
+    Guards against losing unsaved changes (save/discard/cancel prompt),
+    reloads the file, re-detects its language and re-roots/highlights the
+    explorer at the file's parent folder. Returns (language, status_text).
+    """
+    current_language = schema.detect_language(buf.filename or "")
+    if buf.modified:
+        choice = _unsaved_changes_prompt(stdscr.get_wch, render_unsaved)
+        if choice == "save":
+            try:
+                buf.save()
+            except ValueError:
+                return current_language, "No filename — cannot save; open cancelled"
+        elif choice != "discard":
+            return current_language, "Open cancelled"
+    try:
+        buf.load(path)
+    except Exception as exc:
+        return current_language, f"Error opening file: {exc}"
+    language = schema.detect_language(buf.filename or "")
+    if explorer is not None:
+        abs_path = os.path.abspath(path)
+        explorer.set_root(os.path.dirname(abs_path))
+        explorer.current_path = abs_path
+    return language, f"Opened {path}"
 
 
 def format_status_bar(

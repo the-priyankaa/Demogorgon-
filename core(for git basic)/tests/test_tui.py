@@ -1,3 +1,4 @@
+import os
 import unittest
 
 from stdedit.tui import line_number_width, format_status_bar
@@ -66,6 +67,126 @@ class TestStatusBar(unittest.TestCase):
         self.assertIn("[SELECT]", line)
         self.assertIn("[LARGE-FILE: undo off]", line)
         self.assertIn("[MATCH 8:10]", line)
+
+
+class TestPrompts(unittest.TestCase):
+    def test_unsaved_prompt_choices(self):
+        from stdedit.tui import _unsaved_changes_prompt
+
+        self.assertEqual(_unsaved_changes_prompt(iter(["s"]).__next__), "save")
+        self.assertEqual(_unsaved_changes_prompt(iter(["D"]).__next__), "discard")
+        self.assertEqual(_unsaved_changes_prompt(iter(["c"]).__next__), "cancel")
+        self.assertEqual(_unsaved_changes_prompt(iter(["\x1b"]).__next__), "cancel")
+
+    def test_unsaved_prompt_reprompts_on_invalid_keys(self):
+        from stdedit.tui import _unsaved_changes_prompt
+
+        keys = iter(["x", "\n", "d"])
+        self.assertEqual(_unsaved_changes_prompt(keys.__next__), "discard")
+
+    def test_unsaved_prompt_renders_message_once(self):
+        from stdedit.tui import _unsaved_changes_prompt
+
+        seen = []
+        _unsaved_changes_prompt(iter(["s"]).__next__, seen.append)
+        self.assertEqual(seen, ["Unsaved changes — (s)ave, (d)iscard, (c)ancel?"])
+
+    def test_prompt_line_types_backspaces_and_submits(self):
+        from stdedit.tui import _prompt_line
+
+        keys = iter(list("src/st") + ["\x7f", "p", "\r"])
+        self.assertEqual(_prompt_line(keys.__next__, lambda t: None), "src/sp")
+
+    def test_prompt_line_esc_cancels(self):
+        from stdedit.tui import _prompt_line
+
+        self.assertIsNone(_prompt_line(iter(["a", "\x1b"]).__next__, lambda t: None))
+
+    def test_prompt_line_empty_submit_is_cancel(self):
+        from stdedit.tui import _prompt_line
+
+        self.assertIsNone(_prompt_line(iter(["\n"]).__next__, lambda t: None))
+
+
+class TestSafeOpen(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.target = os.path.join(self._tmp.name, "target.py")
+        with open(self.target, "w") as f:
+            f.write("x = 1\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_clean_load_opens_and_syncs_explorer(self):
+        from stdedit.buffer import Buffer
+        from stdedit.explorer import FileExplorer
+        from stdedit.tui import open_file_path
+
+        buf = Buffer()
+        explorer = FileExplorer(".")
+        language, status = open_file_path(None, buf, explorer, self.target)
+        self.assertEqual(language, "python")
+        self.assertTrue(status.startswith("Opened "))
+        self.assertEqual(buf.lines, ["x = 1", ""])
+        self.assertEqual(explorer.current_path, os.path.abspath(self.target))
+        self.assertEqual(explorer.root_dir, os.path.abspath(self._tmp.name))
+
+    def test_modified_buffer_discard_choice_loads_new_file(self):
+        from stdedit.buffer import Buffer
+        from stdedit.tui import open_file_path
+
+        class FakeStdscr:
+            def __init__(self, keys):
+                self._keys = iter(keys)
+
+            def get_wch(self):
+                return next(self._keys)
+
+        buf = Buffer()
+        buf.insert_char("z")  # makes it modified
+        self.assertTrue(buf.modified)
+        _, status = open_file_path(FakeStdscr(["d"]), buf, None, self.target)
+        self.assertTrue(status.startswith("Opened "))
+        self.assertEqual(buf.lines, ["x = 1", ""])
+
+    def test_modified_buffer_cancel_keeps_content(self):
+        from stdedit.buffer import Buffer
+        from stdedit.tui import open_file_path
+
+        class FakeStdscr:
+            def get_wch(self):
+                return "\x1b"
+
+        buf = Buffer()
+        buf.insert_char("z")
+        _, status = open_file_path(FakeStdscr(), buf, None, self.target)
+        self.assertEqual(status, "Open cancelled")
+        self.assertEqual(buf.lines, ["z"])
+
+    def test_save_without_filename_cancels_open(self):
+        from stdedit.buffer import Buffer
+        from stdedit.tui import open_file_path
+
+        class FakeStdscr:
+            def get_wch(self):
+                return "s"
+
+        buf = Buffer()  # no filename -> save raises ValueError internally
+        buf.insert_char("z")
+        _, status = open_file_path(FakeStdscr(), buf, None, self.target)
+        self.assertIn("cannot save", status)
+        self.assertEqual(buf.lines, ["z"])
+
+    def test_missing_file_reports_error(self):
+        from stdedit.buffer import Buffer
+        from stdedit.tui import open_file_path
+
+        buf = Buffer()
+        _, status = open_file_path(None, buf, None, "/nonexistent/nope.py")
+        self.assertIn("Error opening file", status)
 
 
 if __name__ == "__main__":
