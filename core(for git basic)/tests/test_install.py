@@ -247,5 +247,90 @@ class TestStatus(InstallTestBase):
         self.assertIn("linked ->", text)    # stdedit linked
 
 
+def fake_which_state(present):
+    """shutil.which replacement whose result set can grow mid-test."""
+    state = {"found": set(present)}
+
+    def which(name):
+        return name if name in state["found"] else None
+
+    return which, state
+
+
+class TestDeps(unittest.TestCase):
+    def run_deps(self, argv, present=(), fail_install=False):
+        which, state = fake_which_state(present)
+
+        def run(cmd, **kwargs):
+            if fail_install:
+                return SimpleNamespace(returncode=1)
+            # Simulate successful package installation.
+            installed = {cmd[-1]} if cmd[-1] != "xdg-utils" else {"xdg-open"}
+            state["found"] |= installed
+            return SimpleNamespace(returncode=0)
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = main(argv, _root="/unused", _bin_dir="/unused",
+                      _run=run, _which=which)
+        return rc, out.getvalue(), state
+
+    def test_all_helpers_present_needs_no_installer(self):
+        rc, text, _ = self.run_deps(
+            ["deps"], present=("zenity", "kdialog", "xdg-open"))
+        self.assertEqual(rc, 0)
+        self.assertIn("[ok]   zenity", text)
+        self.assertIn("all optional helpers present.", text)
+
+    def test_check_mode_reports_missing_and_exits_nonzero(self):
+        rc, text, _ = self.run_deps(["deps"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(text.count("[miss]"), 3)
+        self.assertIn("deps --fix", text)
+        self.assertIn("standard-library only", text)
+
+    def test_fix_installs_missing_packages_via_detected_manager(self):
+        rc, text, _ = self.run_deps(["deps", "--fix"],
+                                    present=("apt-get",))
+        self.assertEqual(rc, 0, text)
+        self.assertIn("$ sudo apt-get install -y zenity", text)
+        self.assertIn("$ sudo apt-get install -y kdialog", text)
+        self.assertIn("$ sudo apt-get install -y xdg-utils", text)
+        self.assertIn("all optional helpers present now.", text)
+
+    def test_fix_failure_reports_still_missing(self):
+        rc, text, _ = self.run_deps(["deps", "--fix"],
+                                    present=("apt-get",),
+                                    fail_install=True)
+        self.assertEqual(rc, 1)
+        self.assertIn("still missing after fix attempt", text)
+
+    def test_no_package_manager_prints_manual_hint(self):
+        rc, text, _ = self.run_deps(["deps", "--fix"])
+        self.assertEqual(rc, 1)
+        self.assertIn("install manually", text)
+        self.assertIn("kdialog/xdg-utils/zenity", text.replace(" ", ""))
+
+    def test_darwin_specs_use_builtin_open_without_xdg_utils(self):
+        specs = install.helper_specs("Darwin")
+        binaries = [b for b, _, _ in specs]
+        self.assertNotIn("xdg-open", binaries)
+        open_spec = [s for s in specs if s[0] == "open"][0]
+        self.assertEqual(open_spec[2], {})   # nothing to install
+
+    def test_detect_package_manager_prefers_first_known(self):
+        which, _ = fake_which_state(("dnf", "apt-get"))
+        self.assertEqual(install.detect_package_manager(which)[0], "apt-get")
+        which, _ = fake_which_state(("dnf",))
+        self.assertEqual(install.detect_package_manager(which)[0], "dnf")
+        which, _ = fake_which_state(())
+        self.assertIsNone(install.detect_package_manager(which))
+
+    def test_deps_parser_has_fix_flag(self):
+        args = build_parser().parse_args(["deps", "--fix"])
+        self.assertTrue(args.fix)
+        self.assertFalse(build_parser().parse_args(["deps"]).fix)
+
+
 if __name__ == "__main__":
     unittest.main()
