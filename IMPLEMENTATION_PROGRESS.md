@@ -134,14 +134,21 @@ python -m stdedit.main docker-compose.yml
 - **Home/End**: Line start/end
 - **Tab**: Insert tab/indent (returns focus to editor when the tree is active)
 
-#### File tree (Ctrl-E to open/close; focus keys while the panel is active)
+#### File tree (visible and focused on launch; Esc/Tab moves focus to the editor)
 
 - **Ctrl-E**: Toggle explorer panel / return focus to editor
 - **Up/Down**: Move selection in the tree
 - **Enter**: Open file / expand-collapse folder / follow `<..>` to parent
 - **Right / Left**: Expand / collapse folder (Left climbs up when collapsed)
-- **h**: Show or hide dotfiles
+- **n**: Create a new file in the selected directory (status-line prompt)
+- **N**: Create a new folder in the selected directory (status-line prompt)
+- **h**: Show or hide dotfiles (IDE/build artifacts stay hidden regardless)
 - **Ctrl-O**: Open a file by typed path (supports `~`)
+
+The tree shows only working project files: IDE metadata (.idea/.vscode),
+VCS internals (.git), dependency dirs (node_modules/venv), caches
+(__pycache__, .*_cache) and build outputs (build/dist/*.egg-info/*.pyc)
+are filtered out permanently.
 
 ## Project Statistics
 
