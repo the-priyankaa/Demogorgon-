@@ -215,10 +215,42 @@ class TestPrompts(unittest.TestCase):
 
         self.assertIsNone(_prompt_line(iter(["a", "\x1b"]).__next__, lambda t: None))
 
+    def test_prompt_line_key_backspace_constant_deletes(self):
+        from stdedit.tui import _prompt_line
+
+        # Real terminals deliver Backspace as curses.KEY_BACKSPACE (263),
+        # not "\b"/"\x7f" -- it must delete like the byte forms.
+        keys = iter(["a", "b", curses.KEY_BACKSPACE, "c", "\n"])
+        self.assertEqual(_prompt_line(keys.__next__, lambda t: None), "ac")
+
+    def test_prompt_line_backspace_on_empty_text_is_noop(self):
+        from stdedit.tui import _prompt_line
+
+        keys = iter([curses.KEY_BACKSPACE, "x", "\n"])
+        self.assertEqual(_prompt_line(keys.__next__, lambda t: None), "x")
+
     def test_prompt_line_empty_submit_is_cancel(self):
         from stdedit.tui import _prompt_line
 
         self.assertIsNone(_prompt_line(iter(["\n"]).__next__, lambda t: None))
+
+
+class TestTreeSwallow(unittest.TestCase):
+    """Printable keys must be swallowed while the tree has focus (bug 2)."""
+
+    def test_printable_characters_are_swallowed(self):
+        from stdedit.tui import swallowed_by_tree
+
+        for ch in ("x", "A", "1", " ", "!", "é"):
+            self.assertTrue(swallowed_by_tree(ch), repr(ch))
+
+    def test_controls_and_special_keys_pass_through(self):
+        from stdedit.tui import swallowed_by_tree
+
+        for key in ("\n", "\r", "\t", "\x13", "\x1b",
+                    curses.KEY_DOWN, curses.KEY_BACKSPACE, curses.KEY_F1,
+                    None):
+            self.assertFalse(swallowed_by_tree(key), repr(key))
 
 
 class TestSafeOpen(unittest.TestCase):

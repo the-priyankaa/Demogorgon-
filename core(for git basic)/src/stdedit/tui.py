@@ -365,6 +365,9 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 status = ""
                 continue
 
+        if explorer.visible and explorer.active and swallowed_by_tree(key):
+            continue  # tree has focus: never leak typing into the editor
+
         if key == "\x05":  # Ctrl-E - toggle explorer visibility
             explorer.visible = not explorer.visible
             if explorer.visible:
@@ -577,11 +580,23 @@ def is_help_toggle(key, tree_active):
     return bool(tree_active) and key == curses.KEY_BACKSPACE
 
 
+def swallowed_by_tree(key) -> bool:
+    """Should `key` be swallowed while the file tree has focus?
+
+    Only printable single characters: anything else that reaches this
+    point is either a control key with a legitimate global action
+    (Ctrl-S save, Ctrl-Q quit, ...) or an editing key that the editor
+    branch must keep handling.  Without this guard, typing while the
+    tree is focused silently inserts characters into the document.
+    """
+    return isinstance(key, str) and len(key) == 1 and key.isprintable()
+
+
 def _draw_help_overlay(stdscr, lines):
     """Paint a centered bordered help box over the current frame."""
     height, width = stdscr.getmaxyx()
-    inner_w = min(max([len(l) for l in lines] or [20]) + 4,
-                  max(width - 2, 12))
+    inner_w = max(3, min(max([len(l) for l in lines] or [20]) + 4,
+                         width - 2))
     body_h = len(lines)
     box_h = min(body_h + 2, height)
     top = max(0, (height - box_h) // 2)
@@ -656,7 +671,7 @@ def _prompt_line(read_key, render, title: str = "Open file: ") -> Optional[str]:
             return text.strip() or None
         if k == "\x1b":
             return None
-        if k in ("\x7f", "\b"):
+        if k in ("\x7f", "\b", curses.KEY_BACKSPACE):
             text = text[:-1]
         elif isinstance(k, str) and k.isprintable():
             text += k
