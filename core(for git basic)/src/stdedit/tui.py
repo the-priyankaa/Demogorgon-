@@ -182,7 +182,7 @@ def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extens
         status = f"Loaded extensions: {', '.join(loaded)}" if loaded else ""
         if extension_errors:
             status = (status + "  " if status else "") + f"{len(extension_errors)} extension error(s)"
-        hint = "File tree active — Enter opens file/folder, Esc to focus editor"
+        hint = "File tree active — Enter opens file/folder, Esc to focus editor, Ctrl-H help"
         status = (status + "   " if status else "") + hint
         _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer)
     finally:
@@ -191,6 +191,7 @@ def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extens
 
 
 def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext, explorer: FileExplorer) -> None:
+    show_help = False
     while True:
         frame_started = meter.frame_start()
         stdscr.erase()
@@ -244,6 +245,9 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         except curses.error:
             pass
 
+        if show_help:
+            _draw_help_overlay(stdscr, build_help_lines(width))
+
         stdscr.move(
             buf.cursor_y - buf.scroll_y,
             explorer_width + gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
@@ -254,6 +258,16 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         key = _get_key(stdscr)
         if key is None:
+            continue
+
+        # The help guide outranks every other binding (Ctrl-H / F1).
+        if is_help_toggle(key, explorer.visible and explorer.active):
+            show_help = not show_help
+            continue
+        if show_help:
+            # Deliberate dismissal only; other keys are swallowed.
+            if key in ("q", "\x1b", "\n", "\r"):
+                show_help = False
             continue
 
         editor.status = status
@@ -487,6 +501,107 @@ def _draw_status_prompt(stdscr, text: str) -> None:
         stdscr.refresh()
     except curses.error:
         pass
+
+
+# ---------------------------------------------------------------------- #
+# Help overlay (Ctrl-H / F1)
+# ---------------------------------------------------------------------- #
+HELP_SECTIONS = [
+    ("EDITING", [
+        "characters          type to insert text at the cursor",
+        "Enter               insert a new line",
+        "Tab                 indent",
+        "Backspace / Del     delete character",
+        "< > ^ v             move cursor",
+        "Home / End          jump to line start / end",
+    ]),
+    ("SELECTION & CLIPBOARD", [
+        "Ctrl-Space          start / stop selection ([SELECT] in status)",
+        "(arrow keys extend the selection while it is active)",
+        "Ctrl-C              copy selection",
+        "Ctrl-X              cut selection",
+        "Ctrl-V              paste (internal clipboard)",
+    ]),
+    ("HISTORY & FILES", [
+        "Ctrl-Z              undo",
+        "Ctrl-Y              redo",
+        "Ctrl-S              save current file",
+        "Ctrl-O              open a file by typed path (~ supported)",
+        "Ctrl-Q              quit (press again to force with changes)",
+    ]),
+    ("FILE TREE (Ctrl-E panel)", [
+        "Ctrl-E              hide / show the file tree",
+        "^ v                 move selection",
+        "< >                 collapse / expand folder (<..> climbs up)",
+        "Enter               open file / expand folder / go up on <..>",
+        "h                   show / hide dotfiles",
+        "n                   new file in selected folder",
+        "N                   new folder in selected folder",
+        "O                   pick project root via system dialog",
+        "R                   reveal root in system file manager",
+        "Tab / Esc           focus the editor",
+    ]),
+    ("HELP", [
+        "Ctrl-H or F1        open / close this guide",
+        "q / Esc / Enter     close this guide",
+        "",
+        "Note: some terminals merge Ctrl-H with Backspace. If Backspace",
+        "stops deleting while editing, use F1 here instead.",
+    ]),
+]
+
+
+def build_help_lines(width):
+    """Pure helper: help overlay content fitted to `width` columns."""
+    out = []
+    for title, entries in HELP_SECTIONS:
+        out.append(title)
+        for entry in entries:
+            out.append("  " + entry)
+        out.append("")
+    limit = max(10, int(width))
+    return [line[:limit] for line in out]
+
+
+def is_help_toggle(key, tree_active):
+    """Should `key` open/close the help overlay?
+
+    Raw Ctrl-H (\\x08) and F1 work anywhere.  KEY_BACKSPACE doubles as
+    Ctrl-H on terminals whose terminfo maps kbs=^H, so it only opens the
+    guide while the tree is focused -- in the editor it must keep
+    deleting characters.
+    """
+    if key == "\x08" or key == curses.KEY_F1:
+        return True
+    return bool(tree_active) and key in (curses.KEY_BACKSPACE, "\b")
+
+
+def _draw_help_overlay(stdscr, lines):
+    """Paint a centered bordered help box over the current frame."""
+    height, width = stdscr.getmaxyx()
+    inner_w = min(max([len(l) for l in lines] or [20]) + 4,
+                  max(width - 2, 12))
+    body_h = len(lines)
+    box_h = min(body_h + 2, height)
+    top = max(0, (height - box_h) // 2)
+    left = max(0, (width - inner_w) // 2)
+
+    def put(row, col, text, attr=0):
+        try:
+            stdscr.addstr(row, col, text[:width - col], attr)
+        except curses.error:
+            pass
+
+    title = " stdedit help - q/Esc/Enter to close "
+    fill = max(inner_w - 2 - len(title), 0)
+    put(top, left, "\u250c" + "\u2500" * fill + title + "\u2500" *
+        (inner_w - 2 - fill - len(title)) + "\u2510", curses.A_REVERSE)
+    for i in range(box_h - 2):
+        text = lines[i] if i < body_h else ""
+        put(top + 1 + i, left, "\u2502" + " " * inner_w + "\u2502")
+        put(top + 1 + i, left + 2, text.rstrip())
+    put(top + box_h - 1, left,
+        "\u2514" + "\u2500" * (inner_w - 2) + "\u2518")
 
 
 # ---------------------------------------------------------------------- #
