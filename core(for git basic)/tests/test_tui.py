@@ -482,5 +482,43 @@ class TestBracketedPaste(unittest.TestCase):
         self.assertEqual(stdscr._items, [])
 
 
+class TestSearchIntegration(unittest.TestCase):
+    def test_search_mode_enter_exit(self):
+        from stdedit.explorer import FileExplorer
+        e = FileExplorer(".")
+        e.enter_search()
+        self.assertTrue(e.searching)
+        e.exit_search()
+        self.assertFalse(e.searching)
+
+    def test_search_results_replace_items_in_draw(self):
+        from stdedit.explorer import FileExplorer
+        e = FileExplorer(".")
+        e.enter_search()
+        e.search("__init__")
+        self.assertTrue(len(e.search_results) > 0)
+        # All results should be flat (depth=0)
+        for item in e.search_results:
+            self.assertEqual(item[0], 0)
+
+    def test_search_query_updates(self):
+        from stdedit.explorer import FileExplorer
+        e = FileExplorer(".")
+        e.enter_search()
+        e.search("test")
+        self.assertEqual(e.search_query, "test")
+        e.search("test_")
+        self.assertEqual(e.search_query, "test_")
+
+    def test_exit_search_clears_state(self):
+        from stdedit.explorer import FileExplorer
+        e = FileExplorer(".")
+        e.enter_search()
+        e.search("something")
+        e.exit_search()
+        self.assertEqual(e.search_query, "")
+        self.assertEqual(e.search_results, [])
+
+
 if __name__ == "__main__":
     unittest.main()

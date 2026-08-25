@@ -285,5 +285,96 @@ class TestSelection(ExplorerTestBase):
         self.assertEqual(e.items, before)
 
 
+class TestSearch(ExplorerTestBase):
+    def test_enter_exit_search(self):
+        e = FileExplorer(self.root)
+        e.enter_search()
+        self.assertTrue(e.searching)
+        self.assertEqual(e.search_query, "")
+        self.assertEqual(e.search_results, [])
+        e.exit_search()
+        self.assertFalse(e.searching)
+        self.assertEqual(e.search_query, "")
+
+    def test_search_finds_files(self):
+        e = FileExplorer(self.root)
+        e.search("alpha")
+        self.assertEqual(len(e.search_results), 1)
+        self.assertEqual(e.search_results[0][2],
+                         os.path.join(self.root, "alpha.txt"))
+
+    def test_search_finds_dirs(self):
+        e = FileExplorer(self.root)
+        e.search("sub_one")
+        self.assertEqual(len(e.search_results), 1)
+        self.assertTrue(e.search_results[0][3])  # is_dir
+
+    def test_search_case_insensitive(self):
+        e = FileExplorer(self.root)
+        e.search("ALPHA")
+        self.assertEqual(len(e.search_results), 1)
+
+    def test_search_finds_nested_files(self):
+        e = FileExplorer(self.root)
+        e.search("inner")
+        self.assertEqual(len(e.search_results), 1)
+        self.assertEqual(e.search_results[0][2],
+                         os.path.join(self.root, "sub_one", "inner.txt"))
+
+    def test_search_empty_query_returns_nothing(self):
+        e = FileExplorer(self.root)
+        e.search("")
+        self.assertEqual(e.search_results, [])
+
+    def test_search_respects_hidden_filter(self):
+        e = FileExplorer(self.root)
+        e.search("secret")
+        self.assertEqual(len(e.search_results), 0)  # hidden by default
+        e.show_hidden = True
+        e.search("secret")
+        self.assertEqual(len(e.search_results), 1)
+
+    def test_search_respects_always_ignored(self):
+        os.mkdir(os.path.join(self.root, "__pycache__"))
+        with open(os.path.join(self.root, "__pycache__", "mod.pyc"), "w") as f:
+            f.write("")
+        e = FileExplorer(self.root)
+        e.search("mod")
+        self.assertEqual(len(e.search_results), 0)
+
+    def test_search_no_results(self):
+        e = FileExplorer(self.root)
+        e.search("zzzznonexistent")
+        self.assertEqual(e.search_results, [])
+        self.assertEqual(e.selected_idx, 0)
+
+    def test_search_results_are_flat(self):
+        e = FileExplorer(self.root)
+        e.search(".txt")
+        for item in e.search_results:
+            self.assertEqual(item[0], 0)  # all depth=0
+
+    def test_navigate_search_results(self):
+        e = FileExplorer(self.root)
+        e.search("txt")
+        e.move_selection(1)
+        self.assertEqual(e.selected_idx, 1)
+        e.move_selection(-1)
+        self.assertEqual(e.selected_idx, 0)
+
+    def test_search_excludes_parent_entry(self):
+        e = FileExplorer(self.root)
+        e.search("..")
+        self.assertEqual(len(e.search_results), 0)
+
+    def test_search_preserves_normal_tree_after_exit(self):
+        e = FileExplorer(self.root)
+        before = list(e.items)
+        e.enter_search()
+        e.search("alpha")
+        e.exit_search()
+        self.assertEqual(e.items, before)
+
+
 if __name__ == "__main__":
     unittest.main()

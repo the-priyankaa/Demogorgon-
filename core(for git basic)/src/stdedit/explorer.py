@@ -49,6 +49,10 @@ class FileExplorer:
         self.active = True
         self.show_hidden = False
         self.current_path: Optional[str] = None
+        # Search mode state.
+        self.searching = False
+        self.search_query: str = ""
+        self.search_results: List[Item] = []
         self.refresh()
 
     # ------------------------------------------------------------------ #
@@ -84,10 +88,65 @@ class FileExplorer:
 
     def toggle_hidden(self) -> None:
         self.show_hidden = not self.show_hidden
+        if not self.searching:
+            self.refresh()
+
+    # ------------------------------------------------------------------ #
+    # Search
+    # ------------------------------------------------------------------ #
+    def enter_search(self) -> None:
+        """Activate search mode with an empty query."""
+        self.searching = True
+        self.search_query = ""
+        self.search_results = []
+        self.selected_idx = 0
+
+    def exit_search(self) -> None:
+        """Deactivate search and restore the normal tree view."""
+        self.searching = False
+        self.search_query = ""
+        self.search_results = []
         self.refresh()
+
+    def search(self, query: str) -> None:
+        """Walk the entire tree and collect items matching *query*.
+
+        Case-insensitive substring match on file/dir names.  Results are
+        shown as a flat list (depth=0) regardless of where they live in
+        the tree.  Respects ``_is_visible`` and the always-ignored sets.
+        """
+        self.search_query = query
+        if not query:
+            self.search_results = []
+            self.selected_idx = 0
+            return
+        q = query.lower()
+        results: List[Item] = []
+        self._search_walk(self.root_dir, q, results)
+        self.search_results = results
+        self.selected_idx = 0 if results else 0
+
+    def _search_walk(self, directory: str, query: str, results: List[Item]) -> None:
+        """Recursively walk *directory* collecting matches into *results*."""
+        try:
+            entries = os.listdir(directory)
+        except OSError:
+            return
+        for name in sorted(entries, key=str.lower):
+            if not self._is_visible(name):
+                continue
+            full_path = os.path.join(directory, name)
+            is_dir = os.path.isdir(full_path)
+            if query in name.lower():
+                display = ("▶ " + name) if is_dir else ("  " + name)
+                results.append((0, display, full_path, is_dir))
+            if is_dir:
+                self._search_walk(full_path, query, results)
 
     def refresh(self) -> None:
         """Walk the directory tree and rebuild the flat list of visible items."""
+        if self.searching:
+            return  # search results are managed by search()
         self.items = []
         if self.can_go_up():
             self.items.append((0, PARENT, PARENT, False))
@@ -110,14 +169,16 @@ class FileExplorer:
 
     def get_selected(self) -> Optional[Item]:
         """Return the currently selected item."""
-        if 0 <= self.selected_idx < len(self.items):
-            return self.items[self.selected_idx]
+        source = self.search_results if self.searching else self.items
+        if 0 <= self.selected_idx < len(source):
+            return source[self.selected_idx]
         return None
 
     def move_selection(self, dy: int) -> None:
         """Move the selection up or down, clamped to the list bounds."""
-        if self.items:
-            self.selected_idx = max(0, min(len(self.items) - 1, self.selected_idx + dy))
+        source = self.search_results if self.searching else self.items
+        if source:
+            self.selected_idx = max(0, min(len(source) - 1, self.selected_idx + dy))
 
     # ------------------------------------------------------------------ #
     # Creation

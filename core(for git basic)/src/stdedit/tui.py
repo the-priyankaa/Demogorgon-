@@ -298,11 +298,54 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         # Handle file explorer keys when active
         if explorer.visible and explorer.active:
+            # --- search mode: redirect all keys to the search buffer ---
+            if explorer.searching:
+                if key == "\x1b":  # Esc — exit search
+                    explorer.exit_search()
+                    status = ""
+                    continue
+                elif key in (curses.KEY_BACKSPACE, "\x7f", "\b"):
+                    explorer.search_query = explorer.search_query[:-1]
+                    explorer.search(explorer.search_query)
+                    status = f"/{explorer.search_query}" if explorer.search_query else ""
+                    continue
+                elif key in ("\n", "\r"):  # Enter — open selected result
+                    selected = explorer.get_selected()
+                    if selected and not selected[3] and selected[2] != "..":
+                        language, open_status = open_file_path(
+                            stdscr, buf, explorer, selected[2],
+                            render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
+                        )
+                        if open_status.startswith("Opened"):
+                            buf.configure_for_language(language)
+                            explorer.exit_search()
+                            explorer.active = False
+                            status = open_status
+                        else:
+                            status = open_status
+                    continue
+                elif key == curses.KEY_UP:
+                    explorer.move_selection(-1)
+                    continue
+                elif key == curses.KEY_DOWN:
+                    explorer.move_selection(1)
+                    continue
+                elif isinstance(key, str) and len(key) == 1 and key.isprintable():
+                    explorer.search_query += key
+                    explorer.search(explorer.search_query)
+                    status = f"/{explorer.search_query}"
+                    continue
+                # swallow everything else during search
+                continue
             if key == curses.KEY_UP:
                 explorer.move_selection(-1)
                 continue
             elif key == curses.KEY_DOWN:
                 explorer.move_selection(1)
+                continue
+            elif key == "/":  # enter search mode
+                explorer.enter_search()
+                status = "/"
                 continue
             elif key == curses.KEY_RIGHT:
                 selected = explorer.get_selected()
@@ -599,6 +642,7 @@ HELP_SECTIONS = [
         "^ v                 move selection",
         "< >                 collapse / expand folder (<..> climbs up)",
         "Enter               open file / expand folder / go up on <..>",
+        "/                   search files and folders (Esc to cancel)",
         "h                   show / hide dotfiles",
         "n                   new file (opens it for editing)",
         "N                   new folder in selected folder",
@@ -889,10 +933,25 @@ def _draw_explorer(stdscr, explorer: FileExplorer, height: int, width: int,
         except curses.error:
             pass
 
+    # Search mode header
+    if explorer.searching:
+        header = f" /{explorer.search_query}"[:width - 2]
+        try:
+            stdscr.addstr(0, 0, header.ljust(width - 2)[:width - 2],
+                          curses.A_REVERSE | curses.A_BOLD)
+        except curses.error:
+            pass
+        # Offset items below the header
+        draw_height = height - 1
+        item_offset = 1
+    else:
+        draw_height = height
+        item_offset = 0
+
     # Draw explorer items
-    visible_items = explorer.items[:]
-    start_idx = max(0, explorer.selected_idx - height // 2)
-    end_idx = min(len(visible_items), start_idx + height)
+    visible_items = explorer.search_results if explorer.searching else explorer.items[:]
+    start_idx = max(0, explorer.selected_idx - draw_height // 2)
+    end_idx = min(len(visible_items), start_idx + draw_height)
 
     for i, row in enumerate(range(start_idx, end_idx)):
         if row >= len(visible_items):
@@ -911,7 +970,7 @@ def _draw_explorer(stdscr, explorer: FileExplorer, height: int, width: int,
             attr |= curses.A_BOLD | curses.A_UNDERLINE
 
         try:
-            stdscr.addstr(i, 0, display.ljust(width - 2)[:width - 2], attr)
+            stdscr.addstr(item_offset + i, 0, display.ljust(width - 2)[:width - 2], attr)
         except curses.error:
             pass
 
