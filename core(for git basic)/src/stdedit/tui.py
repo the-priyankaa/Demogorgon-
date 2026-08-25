@@ -226,8 +226,9 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         height, width = stdscr.getmaxyx()
         text_height = height - 1  # reserve last row for status line
 
-        # Calculate explorer width
-        explorer_width = 25 if explorer.visible else 0
+        # Calculate explorer width — proportional to terminal width
+        explorer_width = (min(25, max(18, width // 4))
+                          if explorer.visible else 0)
 
         # Draw file explorer if visible
         if explorer.visible:
@@ -273,7 +274,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             extension_status=extensions.status(),
             transient_status=status,
             icon=icons.icon_for_language(schema.language_label(language), icons_on),
-        )[: width - 1]
+            width=width,
+        )
         try:
             stdscr.addstr(height - 1, 0, status_line, curses.A_REVERSE)
         except curses.error:
@@ -1025,6 +1027,9 @@ def clamp_scroll(offset, delta, total, view_h):
     return max(0, min(offset + delta, max(total - view_h, 0)))
 
 
+_MIN_HELP_W = 50
+
+
 def _draw_help_overlay(stdscr, lines, offset=0):
     """Paint a centered bordered help box over the current frame.
 
@@ -1032,8 +1037,9 @@ def _draw_help_overlay(stdscr, lines, offset=0):
     height; ▲/▼ corner markers signal hidden content above/below.
     """
     height, width = stdscr.getmaxyx()
-    inner_w = max(3, min(max([len(l) for l in lines] or [20]) + 4,
-                         width - 2))
+    content_w = max([len(l) for l in lines] or [20])
+    inner_w = max(_MIN_HELP_W, min(content_w + 6, width * 70 // 100))
+    inner_w = min(inner_w, width - 2)
     body_h = len(lines)
     view_h = max(1, min(body_h, height - 2))
     box_h = view_h + 2
@@ -1047,9 +1053,14 @@ def _draw_help_overlay(stdscr, lines, offset=0):
             pass
 
     title = " stdedit help - q/Esc/Enter close \u00b7 arrows scroll "
-    fill = max(inner_w - 2 - len(title), 0)
-    put(top, left, "\u250c" + "\u2500" * fill + title + "\u2500" *
-        (inner_w - 2 - fill - len(title)) + "\u2510", curses.A_REVERSE)
+    max_title_w = inner_w - 2
+    if len(title) > max_title_w:
+        title = title[:max_title_w - 3] + "... "
+    fill = max(max_title_w - len(title), 0)
+    left_fill = fill // 2
+    right_fill = fill - left_fill
+    put(top, left, "\u250c" + "\u2500" * left_fill + title + "\u2500" *
+        right_fill + "\u2510", curses.A_REVERSE)
     for i in range(view_h):
         text = lines[offset + i] if offset + i < body_h else ""
         put(top + 1 + i, left, "\u2502" + " " * inner_w + "\u2502")
@@ -1069,7 +1080,10 @@ def _draw_settings_overlay(stdscr, selected_idx: int) -> None:
     height, width = stdscr.getmaxyx()
     items = settings.LABELS
     body_h = len(items) + 1  # +1 for hint line
-    inner_w = max(3, min(max(len(label) for _, label in items) + 8, width - 2))
+    content_w = max((len(f"[x] {label}") for _, label in items),
+                    default=0)
+    inner_w = max(40, min(content_w + 8, width * 70 // 100))
+    inner_w = min(inner_w, width - 2)
     box_h = body_h + 2
     top = max(0, (height - box_h) // 2)
     left = max(0, (width - inner_w) // 2)
@@ -1081,9 +1095,14 @@ def _draw_settings_overlay(stdscr, selected_idx: int) -> None:
             pass
 
     title = " Settings "
-    fill = max(inner_w - 2 - len(title), 0)
-    put(top, left, "\u250c" + "\u2500" * fill + title + "\u2500" *
-        (inner_w - 2 - fill - len(title)) + "\u2510", curses.A_REVERSE)
+    max_title_w = inner_w - 2
+    if len(title) > max_title_w:
+        title = title[:max_title_w - 3] + "... "
+    fill = max(max_title_w - len(title), 0)
+    left_fill = fill // 2
+    right_fill = fill - left_fill
+    put(top, left, "\u250c" + "\u2500" * left_fill + title + "\u2500" *
+        right_fill + "\u2510", curses.A_REVERSE)
     for i, (key, label) in enumerate(items):
         checked = "[x]" if settings.get(key) else "[ ]"
         line = f" {checked} {label}"
@@ -1240,13 +1259,14 @@ def format_status_bar(
     extension_status="",
     transient_status="",
     icon="",
+    width=0,
 ) -> str:
     """Build the status bar text.
 
-    Pure function (no curses access) so it can be unit tested. Shows the
-    open file name with a dirty marker, the human-readable file type, cursor
-    position and scroll percentage, plus optional mode/meter/extension info.
-    `icon` (a Nerd Font glyph) is rendered inside the type brackets when set.
+    Pure function (no curses access) so it can be unit tested.  When
+    *width* > 0 the bar is split into a left segment (file info and
+    flags) and a right segment (position and scroll %), filled to the
+    full terminal width so it always spans the bottom row.
     """
     name = f"{filename or '[No Name]'}{'*' if modified else ''}"
     sel_flag = " [SELECT]" if selecting else ""
@@ -1257,16 +1277,31 @@ def format_status_bar(
         pct_text = f"  {pct}%"
     else:
         pct_text = ""
-    parts = [
-        f"{name}  [{icon + ' ' if icon else ''}{label}]  Ln {cursor_y + 1}, Col {cursor_x + 1}{sel_flag}{large_flag}{match_flag}{pct_text}"
-    ]
-    if meter_label:
-        parts.append(meter_label)
-    if extension_status:
-        parts.append(extension_status)
+
+    left = f"{name}  [{icon + ' ' if icon else ''}{label}]{sel_flag}{large_flag}{match_flag}"
+    right = f"Ln {cursor_y + 1}, Col {cursor_x + 1}{pct_text}"
+
+    extras = []
     if transient_status:
-        parts.append(transient_status)
-    return "   ".join(parts)
+        extras.append(transient_status)
+    if meter_label:
+        extras.append(meter_label)
+    if extension_status:
+        extras.append(extension_status)
+    extra_part = "  ".join(extras)
+
+    if width <= 0:
+        parts = [f"{left}  {right}"]
+        if extra_part:
+            parts.append(extra_part)
+        return "   ".join(parts)
+
+    sep = " \u2502 "  # thin vertical separator between left and right
+    gap = max(1, width - len(left) - len(sep) - len(right))
+    bar = f"{left}{' ' * gap}{sep}{right}"
+    if extra_part:
+        bar = f"{extra_part}   {bar}"
+    return bar[:width - 1]
 
 
 def _draw_explorer(stdscr, explorer: FileExplorer, height: int, width: int,

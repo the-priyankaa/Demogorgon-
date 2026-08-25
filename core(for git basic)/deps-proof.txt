@@ -17,6 +17,7 @@ Newly imported modules:
  - _contextvars
  - _curses
  - _functools
+ - _json
  - _locale
  - _lzma
  - _opcode
@@ -59,6 +60,10 @@ Newly imported modules:
  - inspect
  - io
  - itertools
+ - json
+ - json.decoder
+ - json.encoder
+ - json.scanner
  - keyword
  - locale
  - lzma
