@@ -154,6 +154,8 @@ _search: dict = {
     "replacements": [],
 }
 
+_mouse_dragging: bool = False
+
 
 def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
     """
@@ -173,6 +175,8 @@ def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None
     stdscr.keypad(True)
     _init_colors()
     _enable_bracketed_paste()
+    curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
+    curses.mouseinterval(0)
     icons_on = icons.enabled_from_env()
 
     language = schema.detect_language(buf.filename or "")
@@ -282,6 +286,39 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         key = _get_key(stdscr)
         if key is None:
+            continue
+
+        # --- Mouse events (before all other key handling) ---
+        if isinstance(key, tuple) and key[0] == "__mouse__":
+            global _mouse_dragging
+            _, mx, my, bstate = key
+            # Convert screen coords → buffer coords.
+            buf_y = buf.scroll_y + my
+            buf_x = buf.scroll_x + (mx - gutter_width - explorer_width)
+            buf_y = max(0, min(buf_y, len(buf.lines) - 1))
+            buf_x = max(0, min(buf_x, len(buf.lines[buf_y])))
+
+            if bstate & curses.BUTTON1_PRESSED:
+                # Click in text area only.
+                if my < text_height and mx >= gutter_width + explorer_width:
+                    buf.move_to(buf_x, buf_y)
+                    buf.selection_anchor = (buf_y, buf_x)
+                    _mouse_dragging = True
+                    selecting = False
+                elif my >= text_height:
+                    # Click on status bar — ignore.
+                    pass
+                else:
+                    # Click in gutter/explorer — ignore (let explorer handle if needed).
+                    pass
+                continue
+            if bstate & curses.BUTTON1_RELEASED:
+                _mouse_dragging = False
+                continue
+            # Motion while dragging (REPORT_MOUSE_POSITION events).
+            if _mouse_dragging:
+                if 0 <= my < text_height and mx >= gutter_width + explorer_width:
+                    buf.move_to(buf_x, buf_y, extend_selection=True)
             continue
 
         # The help guide outranks every other binding (Ctrl-H / F1).
@@ -575,7 +612,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             status = "Redo" if buf.redo() else "Nothing to redo"
         elif key == "\x01":  # Ctrl-A select all
             buf.select_all()
-            selecting = True
+            selecting = False
             status = "Selected all"
         elif key == "\x00":  # Ctrl-Space: toggle selection mode
             selecting = not selecting
@@ -994,6 +1031,12 @@ def _get_key(stdscr):
         return None
     if key == curses.KEY_ENTER:
         return "\n"
+    if key == curses.KEY_MOUSE:
+        try:
+            _, mx, my, _, bstate = curses.getmouse()
+        except curses.error:
+            return None
+        return ("__mouse__", mx, my, bstate)
     return key
 
 
