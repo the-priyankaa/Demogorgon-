@@ -2,4 +2,4 @@
 stdlib_only = true
 third_party_runtime_deps = []
 third_party_dev_deps = []
-note = "See STDLIB.md for what we substituted and why. See deps-proof.sh for verification."
+note = "See docs/STDLIB.md for what we substituted and why. See scripts/deps-proof.sh for verification."

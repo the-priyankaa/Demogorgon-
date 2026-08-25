@@ -13,8 +13,8 @@ import os
 import re
 from typing import List, Optional, Tuple
 
-from .compact import CompactLines
-from .mapped import MappedLines
+from .storage.compact import CompactLines
+from .storage.mapped import MappedLines
 from .undo import UndoManager
 from .clipboard import sys_copy, sys_paste
 

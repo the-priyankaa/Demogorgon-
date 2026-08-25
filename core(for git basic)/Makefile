@@ -7,11 +7,11 @@ test:
 	PYTHONPATH=src python3 -m unittest discover -s tests -v
 
 proof:
-	bash deps-proof.sh
+	bash scripts/deps-proof.sh
 
 clean:
 	find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
-	rm -f deps-proof.txt
+	rm -f deps-proof.txt scripts/deps-proof.txt
 
 install:
 	PYTHONPATH=src python3 -m stdedit.install install

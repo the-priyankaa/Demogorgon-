@@ -6,7 +6,7 @@ Python standard library. Built for [hackathon] Track A.
 - Reimplements the core of `nano`/`micro`-style editing: open, navigate,
   edit, undo/redo, select/copy/cut/paste, save.
 - Regex-based syntax highlighting infrastructure; the current core ships Python and leaves additional language packs to the language layer.
-- Full substitution log: see [`STDLIB.md`](./STDLIB.md).
+- Full substitution log: see [`STDLIB.md`](./docs/STDLIB.md).
 
 ## Install
 
@@ -116,8 +116,9 @@ cat deps-proof.txt
 ```
 src/stdedit/
   buffer.py         # line buffer, cursor, undo/redo, selection, clipboard, indent
-  compact.py        # compact bytearray line storage for large documents
-  mapped.py         # memory-mapped read-mostly line store for huge files
+  storage/
+    compact.py      # compact bytearray line storage for large documents
+    mapped.py       # memory-mapped read-mostly line store for huge files
   undo.py           # snapshot-based undo/redo manager
   perf.py           # RSS / frame-time instrumentation
   tui.py            # curses front end (keymap, rendering, status bar)
@@ -130,8 +131,9 @@ src/stdedit/
     schema.py        # token-rule schema + per-language definitions
 examples/
   extensions/        # example extensions (word count, vim demo, ...)
-tools/
+scripts/
   bench_memory.py    # core Buffer RSS benchmark
+  deps-proof.sh      # zero-dependency proof script
 tests/
   test_buffer.py     # unit tests for the buffer core
   test_languages.py  # language detection + tokenizer tests
@@ -145,7 +147,7 @@ tests/
 | Buffer / undo    | Person B | line buffer, cursor, undo/redo, selection, clipboard, indent, file I/O |
 | Languages / search | Person C | tokenizer schema, syntax highlighting, incremental search, replace-all |
 
-See `.zero-dep.toml` for the dependency pledge and `STDLIB.md` for the
+See `.zero-dep.toml` for the dependency pledge and [`docs/STDLIB.md`](./docs/STDLIB.md) for the
 substitution rationale.
 
 ## Known limitations
@@ -166,7 +168,7 @@ RAM/performance instrumentation, and a stdlib-only extension API.
 - The TUI includes a low-frequency Linux RSS meter and frame-time indicator without third-party dependencies.
 - Undo/redo history is bounded by both operation count (500) and a conservative 32 MiB history-memory budget.
 - A single snapshot larger than the history budget is not retained, so very large files do not create another full-buffer history copy.
-- `tools/bench_memory.py` measures the core Buffer RSS for representative file sizes.
+- `scripts/bench_memory.py` measures the core Buffer RSS for representative file sizes.
 
 
 ## Extensions

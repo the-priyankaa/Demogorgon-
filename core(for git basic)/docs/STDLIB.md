@@ -24,7 +24,7 @@ at 10+).
 ## Verifying it yourself
 
 ```bash
-bash deps-proof.sh
+bash scripts/deps-proof.sh
 cat deps-proof.txt
 ```
 

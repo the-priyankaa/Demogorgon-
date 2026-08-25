@@ -1,6 +1,6 @@
 """Measure core Buffer RSS for generated source files.
 
-Run with: PYTHONPATH=src python tools/bench_memory.py
+Run with: PYTHONPATH=src python scripts/bench_memory.py
 """
 from __future__ import annotations
 import gc

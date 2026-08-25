@@ -382,13 +382,13 @@ class TestBracketsAndLargeFiles(unittest.TestCase):
 
 class TestCompactLargeFileStore(unittest.TestCase):
     def test_large_file_uses_compact_store_and_edits(self):
-        from stdedit.compact import CompactLines
+        from stdedit.storage.compact import CompactLines
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "large.txt")
             with open(path, "wb") as f:
                 f.write((b"alpha\n" * 200000))
             b = Buffer(path, large_file_threshold=1024)
-            from stdedit.mapped import MappedLines
+            from stdedit.storage.mapped import MappedLines
             self.assertIsInstance(b.lines, MappedLines)
             self.assertEqual(b.lines[0], "alpha")
             b.move_to(5, 0)
