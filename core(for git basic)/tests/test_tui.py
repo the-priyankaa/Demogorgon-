@@ -207,6 +207,30 @@ class TestPrompts(unittest.TestCase):
         _unsaved_changes_prompt(iter(["s"]).__next__, seen.append)
         self.assertEqual(seen, ["Unsaved changes — (s)ave, (d)iscard, (c)ancel?"])
 
+    def test_yes_no_prompt_matrix(self):
+        from stdedit.tui import _yes_no_prompt
+
+        for key, expected in (("y", True), ("Y", True),
+                              ("\n", True), ("\r", True),
+                              ("n", False), ("N", False),
+                              ("\x1b", False)):
+            self.assertEqual(
+                _yes_no_prompt(iter([key]).__next__, lambda t: None, "?"),
+                expected, repr(key))
+
+    def test_yes_no_prompt_reprompts_on_other_keys(self):
+        from stdedit.tui import _yes_no_prompt
+
+        keys = iter(["x", "1", " ", "y"])
+        self.assertTrue(_yes_no_prompt(keys.__next__, lambda t: None, "?"))
+
+    def test_yes_no_prompt_renders_message_once(self):
+        from stdedit.tui import _yes_no_prompt
+
+        seen = []
+        _yes_no_prompt(iter(["y"]).__next__, seen.append, "create?")
+        self.assertEqual(seen, ["create?"])
+
     def test_prompt_line_types_backspaces_and_submits(self):
         from stdedit.tui import _prompt_line
 

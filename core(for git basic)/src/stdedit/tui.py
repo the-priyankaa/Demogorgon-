@@ -336,10 +336,22 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
                 name = _prompt_line(lambda: _get_key(stdscr), render, "New file name: ")
                 if name:
-                    _, error = explorer.create_file(name)
+                    path, error = explorer.create_file(name)
                     status = error or f"Created {name}"
                     if not error and name.startswith("."):
                         status += " (hidden — press h to show)"
+                    if not error:
+                        # Create-then-edit: open it straight away (the
+                        # dirty-buffer guard inside still applies).
+                        language, open_status = open_file_path(
+                            stdscr, buf, explorer, path,
+                            render_unsaved=render,
+                        )
+                        if open_status.startswith("Opened"):
+                            explorer.active = False
+                            status = f"Created + opened {name}"
+                        else:
+                            status = f"Created {name} ({open_status})"
                 continue
             elif key == "N":  # new folder in the selected directory
                 render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
@@ -412,11 +424,30 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
             target = _prompt_line(lambda: _get_key(stdscr), render)
             if target:
-                language, status = open_file_path(
-                    stdscr, buf, explorer,
-                    os.path.expanduser(target),
-                    render_unsaved=render,
-                )
+                expanded = os.path.expanduser(target)
+                can_open = True
+                if not os.path.exists(expanded):
+                    # Create-before-editing: offer to make the missing file.
+                    can_open = False
+                    msg = f"'{target}' not found - create it? (y/n)"
+                    if _yes_no_prompt(lambda: _get_key(stdscr), render, msg):
+                        parent = os.path.dirname(expanded) or "."
+                        if not os.path.isdir(parent):
+                            status = f"Cannot create: no folder {parent}"
+                        else:
+                            try:
+                                with open(expanded, "x"):
+                                    pass
+                                can_open = True
+                            except OSError as exc:
+                                status = f"Cannot create file: {exc}"
+                    else:
+                        status = "Cancelled"
+                if can_open:
+                    language, status = open_file_path(
+                        stdscr, buf, explorer, expanded,
+                        render_unsaved=render,
+                    )
             else:
                 status = "Open cancelled"
         elif key == "\x11":  # Ctrl-Q
@@ -549,7 +580,8 @@ HELP_SECTIONS = [
         "Ctrl-Z              undo",
         "Ctrl-Y              redo",
         "Ctrl-S              save current file",
-        "Ctrl-O              open a file by typed path (~ supported)",
+        "Ctrl-O              open a file by typed path (~ supported;",
+        "                    offers to create it if missing)",
         "Ctrl-Q              quit (press again to force with changes)",
     ]),
     ("FILE TREE (Ctrl-E panel)", [
@@ -558,7 +590,7 @@ HELP_SECTIONS = [
         "< >                 collapse / expand folder (<..> climbs up)",
         "Enter               open file / expand folder / go up on <..>",
         "h                   show / hide dotfiles",
-        "n                   new file in selected folder",
+        "n                   new file (opens it for editing)",
         "N                   new folder in selected folder",
         "O                   pick project root via system dialog",
         "R                   reveal root in system file manager",
@@ -573,6 +605,7 @@ HELP_SECTIONS = [
     ]),
     ("HELP", [
         "Ctrl-H or F1        open / close this guide",
+        "Up / Down, PgUp/Dn  scroll this guide",
         "q / Esc / Enter     close this guide",
         "",
         "Note: some terminals merge Ctrl-H with Backspace. If Backspace",
@@ -705,6 +738,25 @@ def _unsaved_changes_prompt(read_key, render=None) -> str:
                 return "discard"
             if k in ("c", "C", "\x1b"):
                 return "cancel"
+
+
+def _yes_no_prompt(read_key, render, message) -> bool:
+    """Single-question confirm. y/Enter -> True; n/Esc -> False.
+
+    Any other key re-prompts, mirroring the unsaved-changes flow.
+    """
+    if render is not None:
+        render(message)
+    while True:
+        try:
+            k = read_key()
+        except curses.error:
+            continue
+        if isinstance(k, str):
+            if k in ("y", "Y", "\n", "\r"):
+                return True
+            if k in ("n", "N", "\x1b"):
+                return False
 
 
 def _prompt_line(read_key, render, title: str = "Open file: ") -> Optional[str]:
