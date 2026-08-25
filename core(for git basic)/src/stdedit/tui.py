@@ -141,6 +141,20 @@ def _read_bracketed_paste(stdscr) -> str:
             return "".join(content)
 
 
+# ---------------------------------------------------------------------- #
+# Find / Replace state (module-level, persists across frames)
+# ---------------------------------------------------------------------- #
+_search: dict = {
+    "query": "",
+    "replace": "",
+    "matches": [],
+    "idx": 0,
+    "anchor": None,
+    "mode": "find",
+    "replacements": [],
+}
+
+
 def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
     """
     TEMPORARY minimal UI — just enough to test buffer.py interactively.
@@ -228,6 +242,10 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 stdscr, row, line_idx, line, buf,
                 scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width + explorer_width,
             )
+            _highlight_find_match(
+                stdscr, row, line_idx, text_width, buf.scroll_x,
+                gutter_width + explorer_width,
+            )
 
         match = buf.matching_bracket()
         status_line = format_status_bar(
@@ -311,18 +329,35 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                     continue
                 elif key in ("\n", "\r"):  # Enter — open selected result
                     selected = explorer.get_selected()
-                    if selected and not selected[3] and selected[2] != "..":
-                        language, open_status = open_file_path(
-                            stdscr, buf, explorer, selected[2],
-                            render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
-                        )
-                        if open_status.startswith("Opened"):
-                            buf.configure_for_language(language)
+                    if selected:
+                        depth, name, path, is_dir = selected
+                        if path == "..":
+                            pass  # ignore parent entry in search results
+                        elif is_dir:
+                            # Exit search and navigate tree to this folder.
                             explorer.exit_search()
-                            explorer.active = False
-                            status = open_status
+                            # Expand every ancestor so the folder is visible.
+                            p = os.path.dirname(path)
+                            while p and p != explorer.root_dir:
+                                explorer.expanded_dirs.add(p)
+                                p = os.path.dirname(p)
+                            explorer.expanded_dirs.add(path)
+                            explorer.refresh()
+                            explorer._select_path(path)
+                            explorer.active = True
+                            status = ""
                         else:
-                            status = open_status
+                            language, open_status = open_file_path(
+                                stdscr, buf, explorer, path,
+                                render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
+                            )
+                            if open_status.startswith("Opened"):
+                                buf.configure_for_language(language)
+                                explorer.exit_search()
+                                explorer.active = False
+                                status = open_status
+                            else:
+                                status = open_status
                     continue
                 elif key == curses.KEY_UP:
                     explorer.move_selection(-1)
@@ -447,14 +482,21 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         if explorer.visible and explorer.active and swallowed_by_tree(key):
             continue  # tree has focus: never leak typing into the editor
 
-        if key == "\x05":  # Ctrl-E - toggle explorer visibility
-            explorer.visible = not explorer.visible
-            if explorer.visible:
+        if key == "\x05":  # Ctrl-E - toggle explorer
+            if not explorer.visible:
+                # Hidden → show and activate
+                explorer.visible = True
                 explorer.active = True
-                status = "Explorer opened (Ctrl-E to close, Enter to open file/folder)"
+                status = "Explorer opened (Esc to close, Enter to open file/folder)"
             else:
-                explorer.active = False
-                status = "Explorer closed"
+                # Visible but editor-focused → activate tree
+                explorer.active = True
+                status = ""
+            continue
+        if key == "\x1b" and explorer.visible and not explorer.active:
+            # Esc from editor with tree visible → hide tree
+            explorer.visible = False
+            status = "Explorer closed"
             continue
         elif key == curses.KEY_RESIZE:
             continue
@@ -503,6 +545,12 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                         explorer.active = False
             else:
                 status = "Open cancelled"
+        elif key == "\x06":  # Ctrl-F: find in buffer
+            explorer.active = False
+            _find_replace_prompt(stdscr, buf, mode="find")
+        elif key == "\x12":  # Ctrl-R: find and replace
+            explorer.active = False
+            _find_replace_prompt(stdscr, buf, mode="replace")
         elif key == "\x11":  # Ctrl-Q
             if buf.modified:
                 status = "Unsaved changes — Ctrl-Q again to force quit, Ctrl-S to save"
@@ -535,7 +583,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         elif key == "\x03":  # Ctrl-C copy
             text = buf.copy()
             status = f"Copied {len(text)} chars" if text else "Nothing selected to copy"
-        elif key == "\x16":  # Ctrl-V paste (internal clipboard only)
+        elif key == "\x16":  # Ctrl-V paste
             buf.paste()
             status = "Pasted" if buf.clipboard else "Clipboard empty"
         elif isinstance(key, str) and key in "([{":
@@ -607,6 +655,192 @@ def _draw_status_prompt(stdscr, text: str) -> None:
         pass
 
 
+def _find_all_matches(buf, query):
+    """Return list of (line, start, end) for every occurrence of *query*."""
+    q = query.lower()
+    results = []
+    for y in range(len(buf.lines)):
+        line = buf.lines[y].lower()
+        start = 0
+        while True:
+            pos = line.find(q, start)
+            if pos < 0:
+                break
+            results.append((y, pos, pos + len(query)))
+            start = pos + 1
+    return results
+
+
+def _find_replace_prompt(stdscr, buf, mode="find"):
+    """Modal find / replace prompt.  Renders the full editor on each keystroke
+    so the user sees highlighted matches in real-time."""
+    global _search
+    _search["mode"] = mode
+    _search["query"] = ""
+    _search["replace"] = ""
+    _search["matches"] = []
+    _search["idx"] = 0
+    _search["anchor"] = (buf.cursor_y, buf.cursor_x)
+    _search["replacements"] = []
+
+    field = "query"  # which field has focus: "query" or "replace"
+    height, width = stdscr.getmaxyx()
+    explorer_width = 25
+    gutter_width = max(2, len(str(max(1, len(buf.lines))))) + 2
+    text_width = max(1, width - explorer_width - gutter_width)
+    text_height = height - 1
+
+    def _render():
+        """Redraw the full screen with match highlights and the prompt."""
+        stdscr.erase()
+        buf.update_scroll(text_height, text_width)
+        for row in range(text_height):
+            line_idx = buf.scroll_y + row
+            _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width,
+                         x_offset=explorer_width)
+            if line_idx < len(buf.lines):
+                _draw_line(stdscr, row, buf.lines[line_idx], buf.scroll_x,
+                           text_width, schema.detect_language(buf.filename or ""),
+                           x_offset=gutter_width + explorer_width)
+                _highlight_selection(stdscr, row, line_idx, buf.lines[line_idx], buf,
+                                     scroll_x=buf.scroll_x, width=text_width,
+                                     x_offset=gutter_width + explorer_width)
+                _highlight_find_match(stdscr, row, line_idx, text_width,
+                                      buf.scroll_x, gutter_width + explorer_width)
+        # Status prompt
+        n = len(_search["matches"])
+        pos = f" [{_search['idx'] + 1}/{n}]" if n else ""
+        if field == "replace" or mode == "replace":
+            label = "Replace" if field == "replace" else "Find"
+            text = f" {label}: {_search[field]}{pos}"
+        else:
+            text = f" Find: {_search['query']}{pos}"
+        try:
+            stdscr.addstr(height - 1, 0, text[: width - 1].ljust(width - 1),
+                          curses.A_REVERSE)
+        except curses.error:
+            pass
+        stdscr.refresh()
+
+    _render()
+    while True:
+        try:
+            key = stdscr.get_wch()
+        except curses.error:
+            continue
+        if isinstance(key, int):
+            if key == curses.KEY_ENTER:
+                key = "\n"
+            elif key == curses.KEY_BACKSPACE:
+                key = "\x7f"
+            else:
+                continue  # ignore other special keys
+        if key == "\x1b":  # Esc — cancel
+            # Undo any replacements made (walk backwards).
+            for y, start, old_text, new_len in reversed(_search["replacements"]):
+                line = buf.lines[y]
+                buf.lines[y] = line[:start] + old_text + line[start + new_len:]
+            buf.move_to(_search["anchor"][1], _search["anchor"][0])
+            _search["query"] = ""
+            _search["replace"] = ""
+            _search["matches"] = []
+            _search["idx"] = 0
+            _search["anchor"] = None
+            _search["replacements"] = []
+            return
+        if key == "\t":  # Tab — switch field (replace mode only)
+            if mode == "replace":
+                field = "replace" if field == "query" else "query"
+                _render()
+            continue
+        if key in ("\n", "\r"):  # Enter
+            if mode == "replace" and field == "query":
+                # Move to replace field.
+                field = "replace"
+                _render()
+                continue
+            if mode == "replace" and _search["matches"]:
+                # Replace current match and advance.
+                m_line, m_start, m_end = _search["matches"][_search["idx"]]
+                old_text = buf.lines[m_line][m_start:m_end]
+                new_len = len(_search["replace"])
+                _search["replacements"].append((m_line, m_start, old_text, new_len))
+                buf.lines[m_line] = (buf.lines[m_line][:m_start]
+                                     + _search["replace"]
+                                     + buf.lines[m_line][m_end:])
+                buf.modified = True
+                # Recompute matches for the original query after replacement.
+                _search["matches"] = _find_all_matches(buf, _search["query"])
+                # Advance past the current position.
+                _search["idx"] = min(_search["idx"] + 1, max(0, len(_search["matches"]) - 1))
+                if _search["matches"]:
+                    ml, ms, me = _search["matches"][_search["idx"]]
+                    buf.move_to(ms, ml)
+                _render()
+                continue
+            # Find mode: confirm and close.
+            _search["query"] = ""
+            _search["replace"] = ""
+            _search["matches"] = []
+            _search["idx"] = 0
+            _search["anchor"] = None
+            _search["replacements"] = []
+            return
+        if key == "\x12":  # Ctrl-R — replace all (while prompt open)
+            if mode == "replace" and _search["matches"]:
+                for m_line, m_start, m_end in _search["matches"]:
+                    old_text = buf.lines[m_line][m_start:m_end]
+                    new_len = len(_search["replace"])
+                    _search["replacements"].append((m_line, m_start, old_text, new_len))
+                    buf.lines[m_line] = (buf.lines[m_line][:m_start]
+                                         + _search["replace"]
+                                         + buf.lines[m_line][m_end:])
+                buf.modified = True
+                # Recompute after all replacements.
+                if _search["query"]:
+                    _search["matches"] = _find_all_matches(buf, _search["query"])
+                    _search["idx"] = min(_search["idx"], max(0, len(_search["matches"]) - 1))
+                    if _search["matches"]:
+                        ml, ms, me = _search["matches"][_search["idx"]]
+                        buf.move_to(ms, ml)
+            _search["query"] = ""
+            _search["replace"] = ""
+            _search["matches"] = []
+            _search["idx"] = 0
+            _search["anchor"] = None
+            _search["replacements"] = []
+            return
+        if key == "\x06":  # Ctrl-F — next match
+            if _search["matches"]:
+                _search["idx"] = (_search["idx"] + 1) % len(_search["matches"])
+                ml, ms, me = _search["matches"][_search["idx"]]
+                buf.move_to(ms, ml)
+                _render()
+            continue
+        if key in (curses.KEY_BACKSPACE, "\x7f", "\b"):
+            target = _search[field]
+            if target:
+                _search[field] = target[:-1]
+                if field == "query" and _search["query"]:
+                    _search["matches"] = _find_all_matches(buf, _search["query"])
+                    _search["idx"] = 0
+                    if _search["matches"]:
+                        ml, ms, me = _search["matches"][0]
+                        buf.move_to(ms, ml)
+                _render()
+            continue
+        if isinstance(key, str) and len(key) == 1 and key.isprintable():
+            _search[field] += key
+            if field == "query":
+                _search["matches"] = _find_all_matches(buf, _search["query"])
+                _search["idx"] = 0
+                if _search["matches"]:
+                    ml, ms, me = _search["matches"][0]
+                    buf.move_to(ms, ml)
+            _render()
+            continue
+
+
 # ---------------------------------------------------------------------- #
 # Help overlay (Ctrl-H / F1)
 # ---------------------------------------------------------------------- #
@@ -621,13 +855,15 @@ HELP_SECTIONS = [
         "( { [               auto-close bracket pairs",
         ") } ]               skip closer / dedent on block close",
         "\" '               auto-close quotes",
+        "Ctrl-F              find text in the file",
+        "Ctrl-R              find and replace text",
     ]),
     ("SELECTION & CLIPBOARD", [
         "Ctrl-Space          start / stop selection ([SELECT] in status)",
         "(arrow keys extend the selection while it is active)",
         "Ctrl-C              copy selection",
         "Ctrl-X              cut selection",
-        "Ctrl-V              paste (internal clipboard)",
+        "Ctrl-V              paste (system + internal clipboard)",
     ]),
     ("HISTORY & FILES", [
         "Ctrl-Z              undo",
@@ -638,11 +874,12 @@ HELP_SECTIONS = [
         "Ctrl-Q              quit (press again to force with changes)",
     ]),
     ("FILE TREE (Ctrl-E panel)", [
-        "Ctrl-E              hide / show the file tree",
+        "Ctrl-E              open / focus the file tree",
         "^ v                 move selection",
         "< >                 collapse / expand folder (<..> climbs up)",
         "Enter               open file / expand folder / go up on <..>",
         "/                   search files and folders (Esc to cancel)",
+        "Esc                 close the file tree",
         "h                   show / hide dotfiles",
         "n                   new file (opens it for editing)",
         "N                   new folder in selected folder",
@@ -1023,6 +1260,28 @@ def _highlight_selection(stdscr, row, line_idx, line, buf, scroll_x, width, x_of
     if start >= end:
         return
     _addstr_clip(stdscr, row, start, line[start:end], scroll_x, width, curses.A_REVERSE, x_offset)
+
+
+def _highlight_find_match(stdscr, row, line_idx, width, scroll_x, x_offset) -> None:
+    """Highlight the current find-match on this row, if any."""
+    if not _search["query"] or not _search["matches"]:
+        return
+    m_line, m_start, m_end = _search["matches"][_search["idx"]]
+    if m_line != line_idx:
+        return
+    col = m_start - scroll_x
+    end_col = m_end - scroll_x
+    if end_col <= 0 or col >= width:
+        return
+    vis_start = max(0, col)
+    vis_end = min(end_col, width)
+    if vis_start < vis_end:
+        try:
+            stdscr.addstr(row, x_offset + vis_start,
+                          " " * (vis_end - vis_start),
+                          curses.A_REVERSE | curses.A_BOLD)
+        except curses.error:
+            pass
 
 
 def _draw_line(stdscr, row: int, line: str, scroll_x: int, width: int, language: str, x_offset=0) -> None:

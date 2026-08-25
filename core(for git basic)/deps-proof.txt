@@ -82,6 +82,7 @@ Newly imported modules:
  - signal
  - stdedit
  - stdedit.buffer
+ - stdedit.clipboard
  - stdedit.compact
  - stdedit.explorer
  - stdedit.extensions

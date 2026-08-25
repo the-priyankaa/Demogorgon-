@@ -16,6 +16,7 @@ from typing import List, Optional, Tuple
 from .compact import CompactLines
 from .mapped import MappedLines
 from .undo import UndoManager
+from .clipboard import sys_copy, sys_paste
 
 DEFAULT_LARGE_FILE_BYTES = 8 * 1024 * 1024
 BRACKET_PAIRS = {"(": ")", "[": "]", "{": "}"}
@@ -299,6 +300,44 @@ class Buffer:
         self._selection_guard(extend_selection)
         self.cursor_y = max(0, min(y, len(self.lines) - 1))
         self.cursor_x = max(0, min(x, len(self.lines[self.cursor_y])))
+
+    def find_next(self, query: str) -> Optional[Tuple[int, int, int]]:
+        """Find next occurrence of *query* after cursor (case-insensitive).
+
+        Wraps around from the end of the buffer back to the top.
+        Moves cursor to the match start and returns ``(line, start, end)``
+        or ``None`` when nothing matches.
+        """
+        if not query:
+            return None
+        q = query.lower()
+        line_count = len(self.lines)
+
+        # Search from cursor_x + 1 on the current line.
+        line = self.lines[self.cursor_y]
+        start = line.lower().find(q, self.cursor_x + 1)
+        if start >= 0:
+            self.move_to(start, self.cursor_y)
+            return (self.cursor_y, start, start + len(query))
+
+        # Search subsequent lines.
+        for y in range(self.cursor_y + 1, line_count):
+            line = self.lines[y]
+            start = line.lower().find(q)
+            if start >= 0:
+                self.move_to(start, y)
+                return (y, start, start + len(query))
+
+        # Wrap: search from the beginning up to the cursor position.
+        for y in range(0, self.cursor_y + 1):
+            line = self.lines[y]
+            end = self.cursor_x if y == self.cursor_y else len(line)
+            start = line.lower().find(q, 0, end)
+            if start >= 0:
+                self.move_to(start, y)
+                return (y, start, start + len(query))
+
+        return None
 
     def update_scroll(self, viewport_height: int, viewport_width: int) -> None:
         """Keep cursor within the visible viewport. Called by the TUI each frame."""
@@ -628,17 +667,22 @@ class Buffer:
         text = self.selected_text()
         if text:
             self.clipboard = text
+            sys_copy(text)
         return self.clipboard
 
     def cut(self) -> str:
         text = self.selected_text()
         if text:
             self.clipboard = text
+            sys_copy(text)
             self.delete_selection()
         return self.clipboard
 
     def paste(self, text: Optional[str] = None) -> None:
-        text = self.clipboard if text is None else text
+        if text is None:
+            # Try system clipboard first, fall back to internal.
+            sys_text = sys_paste()
+            text = sys_text if sys_text else self.clipboard
         if not text:
             return
         if self.has_selection():
