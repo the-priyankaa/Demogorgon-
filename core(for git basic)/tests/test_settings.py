@@ -160,5 +160,65 @@ class TestLabels(unittest.TestCase):
         self.assertEqual(keys, set(settings._DEFAULTS.keys()))
 
 
+class TestRadioGroup(unittest.TestCase):
+    """toggle_radio: mutual exclusion within radio groups."""
+
+    def setUp(self):
+        settings._settings = dict(settings._DEFAULTS)
+
+    def test_toggle_radio_turns_on_and_clears_others(self):
+        settings.toggle_radio("auto_save_idle")
+        self.assertTrue(settings.get("auto_save_idle"))
+        self.assertFalse(settings.get("auto_save_periodic"))
+        self.assertFalse(settings.get("auto_save_on_edit"))
+
+    def test_toggle_radio_already_active_turns_off(self):
+        settings.toggle_radio("auto_save_idle")   # ON
+        settings.toggle_radio("auto_save_idle")   # OFF
+        self.assertFalse(settings.get("auto_save_idle"))
+        self.assertFalse(settings.get("auto_save_periodic"))
+        self.assertFalse(settings.get("auto_save_on_edit"))
+
+    def test_toggle_radio_cross_activation(self):
+        settings.toggle_radio("auto_save_idle")    # idle ON
+        settings.toggle_radio("auto_save_periodic")  # periodic ON, idle OFF
+        self.assertFalse(settings.get("auto_save_idle"))
+        self.assertTrue(settings.get("auto_save_periodic"))
+        self.assertFalse(settings.get("auto_save_on_edit"))
+
+    def test_toggle_radio_non_radio_key_uses_plain_toggle(self):
+        settings.toggle_radio("no_such_key")
+        self.assertTrue(settings.get("no_such_key"))
+
+    def test_is_radio_key(self):
+        self.assertTrue(settings.is_radio_key("auto_save_idle"))
+        self.assertTrue(settings.is_radio_key("auto_save_periodic"))
+        self.assertTrue(settings.is_radio_key("auto_save_on_edit"))
+        self.assertFalse(settings.is_radio_key("no_such_key"))
+
+    def test_enforce_on_load_fixes_legacy_multi(self):
+        """Legacy config with multiple ON → load keeps only the first."""
+        settings._settings["auto_save_idle"] = True
+        settings._settings["auto_save_periodic"] = True
+        settings._settings["auto_save_on_edit"] = True
+        settings._enforce_radio_groups()
+        self.assertTrue(settings.get("auto_save_idle"))
+        self.assertFalse(settings.get("auto_save_periodic"))
+        self.assertFalse(settings.get("auto_save_on_edit"))
+
+    def test_toggle_radio_persists_and_reloads(self):
+        settings.toggle_radio("auto_save_on_edit")
+        settings._save()
+        settings._load()
+        self.assertTrue(settings.get("auto_save_on_edit"))
+        self.assertFalse(settings.get("auto_save_idle"))
+
+    def test_any_auto_save_only_checks_radio_group(self):
+        settings.toggle_radio("auto_save_periodic")
+        self.assertTrue(settings.any_auto_save())
+        settings.toggle_radio("auto_save_periodic")  # OFF
+        self.assertFalse(settings.any_auto_save())
+
+
 if __name__ == "__main__":
     unittest.main()

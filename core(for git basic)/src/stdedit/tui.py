@@ -383,7 +383,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             elif key == curses.KEY_DOWN:
                 settings_idx = (settings_idx + 1) % n_items
             elif key in (" ", "\n", "\r"):
-                settings.toggle(settings.LABELS[settings_idx][0])
+                settings.toggle_radio(settings.LABELS[settings_idx][0])
             elif key in ("\x1b", "\x10", "q"):
                 show_settings = False
             continue
@@ -1104,8 +1104,12 @@ def _draw_settings_overlay(stdscr, selected_idx: int) -> None:
     put(top, left, "\u250c" + "\u2500" * left_fill + title + "\u2500" *
         right_fill + "\u2510", curses.A_REVERSE)
     for i, (key, label) in enumerate(items):
-        checked = "[x]" if settings.get(key) else "[ ]"
-        line = f" {checked} {label}"
+        on = settings.get(key)
+        if settings.is_radio_key(key):
+            marker = "(x)" if on else "( )"
+        else:
+            marker = "[x]" if on else "[ ]"
+        line = f" {marker} {label}"
         attr = curses.A_REVERSE if i == selected_idx else 0
         put(top + 1 + i, left, "\u2502" + " " * inner_w + "\u2502")
         put(top + 1 + i, left + 1, line[:inner_w - 2], attr)
