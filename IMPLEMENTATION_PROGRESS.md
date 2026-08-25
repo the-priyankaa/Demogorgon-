@@ -202,6 +202,12 @@ python -m stdedit.main docker-compose.yml
   on an indent-only line replaces the whitespace with the closer
   (`smart_dedent_on_char`).  Bare buffers keep the legacy colon-based
   indent as a safe fallback.
+- **File tree search** (`/`): pressing `/` while the tree has focus
+  enters search mode; the user types a query and the tree is replaced
+  with a flat list of all matching files/folders across the entire
+  project.  Case-insensitive substring match; respects hidden-file
+  filter and always-ignored sets.  Esc exits search, Enter opens the
+  selected result.  A search header line is drawn in the tree panel.
 
 The tree shows only working project files: IDE metadata (.idea/.vscode),
 VCS internals (.git), dependency dirs (node_modules/venv), caches
@@ -210,7 +216,7 @@ are filtered out permanently.
 
 ## Project Statistics
 
-- **Total Test Count**: 219 tests (all passing)
+- **Total Test Count**: 232 tests (all passing)
 - **Languages Supported**: 16 (including plaintext)
 - **Lines of Code Added**: ~300+ lines
 - **Files Modified**: 3 core files
