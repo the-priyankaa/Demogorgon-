@@ -608,6 +608,19 @@ class Buffer:
     def clear_selection(self) -> None:
         self.selection_anchor = None
 
+    def select_all(self) -> None:
+        self.selection_anchor = (0, 0)
+        last = len(self.lines) - 1
+        if self.lines[last]:
+            self.cursor_y = last
+            self.cursor_x = len(self.lines[last])
+        elif last > 0:
+            self.cursor_y = last - 1
+            self.cursor_x = len(self.lines[last - 1])
+        else:
+            self.cursor_y = 0
+            self.cursor_x = 0
+
     def _normalized_selection(self) -> Optional[Tuple[int, int, int, int]]:
         if not self.has_selection():
             return None

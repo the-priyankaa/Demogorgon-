@@ -548,9 +548,11 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         elif key == "\x06":  # Ctrl-F: find in buffer
             explorer.active = False
             _find_replace_prompt(stdscr, buf, mode="find")
-        elif key == "\x12":  # Ctrl-R: find and replace
+        elif key == "\x12":  # Ctrl-R: replace all
             explorer.active = False
-            _find_replace_prompt(stdscr, buf, mode="replace")
+            result = _find_replace_prompt(stdscr, buf, mode="replace")
+            if result:
+                status = result
         elif key == "\x11":  # Ctrl-Q
             if buf.modified:
                 status = "Unsaved changes — Ctrl-Q again to force quit, Ctrl-S to save"
@@ -571,6 +573,10 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             status = "Undo" if buf.undo() else "Nothing to undo"
         elif key == "\x19":  # Ctrl-Y redo
             status = "Redo" if buf.redo() else "Nothing to redo"
+        elif key == "\x01":  # Ctrl-A select all
+            buf.select_all()
+            selecting = True
+            status = "Selected all"
         elif key == "\x00":  # Ctrl-Space: toggle selection mode
             selecting = not selecting
             if not selecting:
@@ -760,34 +766,7 @@ def _find_replace_prompt(stdscr, buf, mode="find"):
                 _render()
                 continue
             if mode == "replace" and _search["matches"]:
-                # Replace current match and advance.
-                m_line, m_start, m_end = _search["matches"][_search["idx"]]
-                old_text = buf.lines[m_line][m_start:m_end]
-                new_len = len(_search["replace"])
-                _search["replacements"].append((m_line, m_start, old_text, new_len))
-                buf.lines[m_line] = (buf.lines[m_line][:m_start]
-                                     + _search["replace"]
-                                     + buf.lines[m_line][m_end:])
-                buf.modified = True
-                # Recompute matches for the original query after replacement.
-                _search["matches"] = _find_all_matches(buf, _search["query"])
-                # Advance past the current position.
-                _search["idx"] = min(_search["idx"] + 1, max(0, len(_search["matches"]) - 1))
-                if _search["matches"]:
-                    ml, ms, me = _search["matches"][_search["idx"]]
-                    buf.move_to(ms, ml)
-                _render()
-                continue
-            # Find mode: confirm and close.
-            _search["query"] = ""
-            _search["replace"] = ""
-            _search["matches"] = []
-            _search["idx"] = 0
-            _search["anchor"] = None
-            _search["replacements"] = []
-            return
-        if key == "\x12":  # Ctrl-R — replace all (while prompt open)
-            if mode == "replace" and _search["matches"]:
+                # Replace ALL matches.
                 for m_line, m_start, m_end in _search["matches"]:
                     old_text = buf.lines[m_line][m_start:m_end]
                     new_len = len(_search["replace"])
@@ -796,13 +775,15 @@ def _find_replace_prompt(stdscr, buf, mode="find"):
                                          + _search["replace"]
                                          + buf.lines[m_line][m_end:])
                 buf.modified = True
-                # Recompute after all replacements.
-                if _search["query"]:
-                    _search["matches"] = _find_all_matches(buf, _search["query"])
-                    _search["idx"] = min(_search["idx"], max(0, len(_search["matches"]) - 1))
-                    if _search["matches"]:
-                        ml, ms, me = _search["matches"][_search["idx"]]
-                        buf.move_to(ms, ml)
+                count = len(_search["replacements"])
+                _search["query"] = ""
+                _search["replace"] = ""
+                _search["matches"] = []
+                _search["idx"] = 0
+                _search["anchor"] = None
+                _search["replacements"] = []
+                return f"Replaced {count} occurrences"
+            # Find mode: confirm and close.
             _search["query"] = ""
             _search["replace"] = ""
             _search["matches"] = []
@@ -856,9 +837,10 @@ HELP_SECTIONS = [
         ") } ]               skip closer / dedent on block close",
         "\" '               auto-close quotes",
         "Ctrl-F              find text in the file",
-        "Ctrl-R              find and replace text",
+        "Ctrl-R              replace all occurrences",
     ]),
     ("SELECTION & CLIPBOARD", [
+        "Ctrl-A              select all",
         "Ctrl-Space          start / stop selection ([SELECT] in status)",
         "(arrow keys extend the selection while it is active)",
         "Ctrl-C              copy selection",
