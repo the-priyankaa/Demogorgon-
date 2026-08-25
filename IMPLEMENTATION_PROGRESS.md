@@ -193,6 +193,15 @@ python -m stdedit.main docker-compose.yml
   `STDEDIT_ICONS=0`.  Recommended terminal font: **MesloLGS NF**
   (app cannot set the terminal font itself, so per-emulator setup is
   documented in README.md).
+- **Language-aware indentation**: `schema.py` now carries an `indent`
+  dict on every language (tab size, increase/decrease regexes).
+  `Buffer.configure_for_language()` applies those settings; on Enter
+  the new line auto-indents by one level when the cursor line ends with
+  an opening construct (`:`, `{`, etc.) and auto-dedents when the text
+  after the cursor starts with a closer (`}`, `]`, `)`).  Typing `}`
+  on an indent-only line replaces the whitespace with the closer
+  (`smart_dedent_on_char`).  Bare buffers keep the legacy colon-based
+  indent as a safe fallback.
 
 The tree shows only working project files: IDE metadata (.idea/.vscode),
 VCS internals (.git), dependency dirs (node_modules/venv), caches
@@ -201,7 +210,7 @@ are filtered out permanently.
 
 ## Project Statistics
 
-- **Total Test Count**: 90 tests (all passing)
+- **Total Test Count**: 219 tests (all passing)
 - **Languages Supported**: 16 (including plaintext)
 - **Lines of Code Added**: ~300+ lines
 - **Files Modified**: 3 core files
