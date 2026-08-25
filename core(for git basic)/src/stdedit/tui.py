@@ -186,13 +186,13 @@ def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extens
             status = (status + "  " if status else "") + f"{len(extension_errors)} extension error(s)"
         hint = "File tree active — Enter opens file/folder, Esc to focus editor, Ctrl-H help"
         status = (status + "   " if status else "") + hint
-        _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer)
+        _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer, icons_on)
     finally:
         extensions.shutdown()
         _disable_bracketed_paste()
 
 
-def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext, explorer: FileExplorer) -> None:
+def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext, explorer: FileExplorer, icons_on: bool = False) -> None:
     show_help = False
     while True:
         frame_started = meter.frame_start()

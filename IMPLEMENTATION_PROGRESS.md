@@ -177,6 +177,23 @@ python -m stdedit.main docker-compose.yml
   folder; failed opens keep tree focus; help overlay clamps to
   ultra-narrow terminals.
 
+- **Create-then-edit flows** (pty-verified): `n` in the file tree now
+  opens the freshly created file straight away (through the dirty-
+  guarded open path) and hands focus to the editor.  Ctrl-O on a
+  nonexistent path asks "create it? (y/n)" first; y creates an empty
+  file in an existing parent then opens it; n/Esc touches nothing.
+- **Scrollable help guide**: Up/Down (±1 row) and PgUp/PgDn (±page)
+  scroll through the help overlay when the content exceeds the
+  terminal height; offset resets to the top on every open.  Triangle
+  markers appear in the box corners when lines lie above/below.
+- **Nerd Font language icons**: new `icons.py` maps all 17 supported
+  languages and common extensions to Nerd Fonts v3 codepoints.  Icons
+  render in the status bar `[<icon> Language]` and as file prefixes
+  in the tree (explorer core stays pure).  On by default; disable with
+  `STDEDIT_ICONS=0`.  Recommended terminal font: **MesloLGS NF**
+  (app cannot set the terminal font itself, so per-emulator setup is
+  documented in README.md).
+
 The tree shows only working project files: IDE metadata (.idea/.vscode),
 VCS internals (.git), dependency dirs (node_modules/venv), caches
 (__pycache__, .*_cache) and build outputs (build/dist/*.egg-info/*.pyc)

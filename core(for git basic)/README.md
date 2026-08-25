@@ -68,10 +68,35 @@ desktop's file manager (xdg-open), falling back gracefully when absent.
 ## Keys
 
 Press **Ctrl-H** (or **F1**) inside the editor for the built-in guide —
-every keybinding with descriptions, grouped by area; close it with `q`,
-`Esc`, or `Enter`. On terminals that merge Ctrl-H with Backspace, F1
-always works, and Backspace opens the guide while the file tree is
-focused.
+every keybinding with descriptions, grouped by area; scroll with
+arrow keys / PgUp / PgDn; close it with `q`, `Esc`, or `Enter`. On
+terminals that merge Ctrl-H with Backspace, F1 always works, and
+Backspace opens the guide while the file tree is focused.
+
+**Quick-create:** pressing `n` in the file tree creates the file and
+opens it immediately in the editor for editing (unsaved-changes guard
+still applies). **Ctrl-O** with a nonexistent path offers to create
+the file before opening it.
+
+## Font (optional — icons)
+
+The status bar and file tree use **Nerd Font** language icons (Python,
+JavaScript, Rust …).  Icons are on by default and need a Nerd Font to
+render; without one, disable them:
+
+```bash
+STDEDIT_ICONS=0 yuki <file>
+```
+
+Recommended font: **MesloLGS NF** — set it in your terminal:
+
+| Terminal          | How                                                          |
+|-------------------|--------------------------------------------------------------|
+| GNOME Terminal    | Preferences → Custom font → MesloLGS NF                     |
+| kitty             | `font_family MesloLGS NF` in `~/.config/kitty/kitty.conf`   |
+| iTerm2            | Profiles → Text → Font → MesloLGS NF                        |
+| Windows Terminal  | `fontFace` → `"MesloLGS NF"` in settings.json               |
+| Alacritty         | `font.family` → `"MesloLGS NF"` in alacritty.toml           |
 
 ## Run tests
 
