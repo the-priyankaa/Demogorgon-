@@ -204,5 +204,25 @@ class TestJavaTokenizer(unittest.TestCase):
         self.assertTrue(found)
 
 
+class TestIndentSpecs(unittest.TestCase):
+    def test_all_languages_have_indent_size(self):
+        from stdedit.languages.schema import LANGUAGES, get_indent_spec
+
+        for name in LANGUAGES:
+            spec = get_indent_spec(name)
+            self.assertIn("size", spec, name)
+            self.assertIsInstance(spec["size"], int, name)
+            self.assertGreater(spec["size"], 0, name)
+
+    def test_brace_languages_have_decrease(self):
+        from stdedit.languages.schema import get_indent_spec
+
+        for lang in ("javascript", "typescript", "c", "cpp", "java",
+                     "rust", "go", "css"):
+            spec = get_indent_spec(lang)
+            self.assertIn("increase", spec, lang)
+            self.assertIn("decrease", spec, lang)
+
+
 if __name__ == "__main__":
     unittest.main()

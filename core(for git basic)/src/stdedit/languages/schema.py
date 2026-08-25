@@ -33,9 +33,14 @@ from typing import Dict, List, Tuple
 TokenSpan = Tuple[int, int, str]  # start, end, token_type
 
 LANGUAGES: Dict[str, dict] = {
-    "plaintext": {"extensions": [], "rules": []},
+    "plaintext": {
+        "extensions": [],
+        "rules": [],
+        "indent": {"size": 4},
+    },
     "python": {
         "extensions": [".py", ".pyw"],
+        "indent": {"size": 4, "increase": r":\s*$"},
         "rules": [
             # Order matters: earlier rules win at the same start position.
             ("comment", r"#.*"),
@@ -52,6 +57,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "javascript": {
         "extensions": [".js", ".jsx", ".mjs"],
+        "indent": {"size": 2, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
             ("string", r"(`(?:[^`\\]|\\.)*`|\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')"),
@@ -68,6 +74,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "typescript": {
         "extensions": [".ts", ".tsx"],
+        "indent": {"size": 2, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
             ("string", r"(`(?:[^`\\]|\\.)*`|\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')"),
@@ -87,6 +94,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "html": {
         "extensions": [".html", ".htm"],
+        "indent": {"size": 2, "increase": r"<[^/!-][^>]*>\s*$", "decrease": r"</"},
         "rules": [
             ("comment", r"<!--.*?-->"),
             ("tag", r"</?[a-zA-Z][a-zA-Z0-9-]*|/?>"),
@@ -96,6 +104,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "css": {
         "extensions": [".css", ".scss", ".sass"],
+        "indent": {"size": 2, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"/\*.*?\*/|//.*"),
             ("property", r"\b[a-z-]+(?=\s*:)"),
@@ -107,6 +116,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "c": {
         "extensions": [".c", ".h"],
+        "indent": {"size": 4, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
             ("string", r"\"(?:[^\"\\]|\\.)*\""),
@@ -123,6 +133,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "cpp": {
         "extensions": [".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".h++", ".C"],
+        "indent": {"size": 4, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
             ("string", r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'"),
@@ -145,6 +156,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "java": {
         "extensions": [".java"],
+        "indent": {"size": 4, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
             ("string", r"\"(?:[^\"\\]|\\.)*\""),
@@ -163,6 +175,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "rust": {
         "extensions": [".rs"],
+        "indent": {"size": 4, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
             ("string", r'"(?:[^"\\]|\\.)*"'),
@@ -179,6 +192,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "go": {
         "extensions": [".go"],
+        "indent": {"size": 4, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
             ("string", r"`[^`]*`|\"(?:[^\"\\]|\\.)*\""),
@@ -196,6 +210,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "json": {
         "extensions": [".json"],
+        "indent": {"size": 2, "increase": r"[\[\{]\s*$", "decrease": r"[\]\}]"},
         "rules": [
             ("keyword", r"\b(?:true|false|null)\b"),
             ("string", r"\"(?:[^\"\\]|\\.)*\""),
@@ -204,6 +219,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "yaml": {
         "extensions": [".yaml", ".yml"],
+        "indent": {"size": 2, "increase": r":\s*$"},
         "rules": [
             ("comment", r"#.*"),
             ("keyword", r"\b(?:true|false|null|yes|no|on|off)\b"),
@@ -214,6 +230,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "markdown": {
         "extensions": [".md", ".markdown"],
+        "indent": {"size": 4},
         "rules": [
             ("comment", r"<!--.*?-->"),
             ("keyword", r"^#{1,6}\s.*$|^\*\*.*?\*\*|^__.*?__|^\*.*?\*|^_.*?_"),
@@ -222,6 +239,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "shell": {
         "extensions": [".sh", ".bash", ".zsh"],
+        "indent": {"size": 4, "increase": r"(?:;\s*$|then\s*$|do\s*$|in\s*$)"},
         "rules": [
             ("comment", r"#.*"),
             ("string", r"\"(?:[^\"\\$]|\\.)*\"|'[^']*'"),
@@ -236,6 +254,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "sql": {
         "extensions": [".sql"],
+        "indent": {"size": 4},
         "rules": [
             ("comment", r"--.*|/\*.*?\*/"),
             ("string", r"'(?:[^'\\]|\\.)*'"),
@@ -254,6 +273,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "xml": {
         "extensions": [".xml", ".svg", ".xhtml"],
+        "indent": {"size": 2, "increase": r"<[^/!-][^>]*>\s*$", "decrease": r"</"},
         "rules": [
             ("comment", r"<!--.*?-->"),
             ("tag", r"</?[a-zA-Z][a-zA-Z0-9:-]*|/?>"),
@@ -322,3 +342,13 @@ def tokenize(line: str, language: str) -> List[TokenSpan]:
         token_type = match.lastgroup
         spans.append((match.start(), match.end(), token_type))
     return spans
+
+
+def get_indent_spec(language: str) -> dict:
+    """Return the indent config dict for a language.
+
+    Always returns a dict with at least ``size`` (default 4).  The
+    ``increase`` and ``decrease`` keys are optional raw regex strings
+    that the Buffer will compile.
+    """
+    return LANGUAGES.get(language, {}).get("indent", {"size": 4})

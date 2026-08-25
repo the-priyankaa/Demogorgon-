@@ -206,6 +206,86 @@ class TestIndentAndTabs(unittest.TestCase):
         self.assertEqual(b.lines, ["\tfoo"])
 
 
+class TestLanguageIndent(unittest.TestCase):
+    def test_configure_sets_tab_size_and_patterns(self):
+        b = Buffer()
+        b.configure_for_language("python")
+        self.assertEqual(b.tab_size, 4)
+        self.assertIsNotNone(b._increase_re)
+        self.assertIsNone(b._decrease_re)
+
+        b2 = Buffer()
+        b2.configure_for_language("javascript")
+        self.assertEqual(b2.tab_size, 2)
+        self.assertIsNotNone(b2._increase_re)
+        self.assertIsNotNone(b2._decrease_re)
+
+    def test_python_colon_indents(self):
+        b = Buffer()
+        b.configure_for_language("python")
+        b.lines = ["if True:"]
+        b.move_to(len("if True:"), 0)
+        b.insert_newline()
+        self.assertEqual(b.lines, ["if True:", "    "])
+        self.assertEqual(b.cursor_x, 4)
+
+    def test_javascript_brace_indents(self):
+        b = Buffer(tab_size=2)
+        b.configure_for_language("javascript")
+        b.lines = ["function foo() {"]
+        b.move_to(len("function foo() {"), 0)
+        b.insert_newline()
+        self.assertEqual(b.lines, ["function foo() {", "  "])
+        self.assertEqual(b.cursor_x, 2)
+
+    def test_decrease_on_closer_after_cursor(self):
+        b = Buffer(tab_size=4)
+        b.configure_for_language("c")
+        b.lines = ["    int x = 0;}"]
+        b.move_to(14, 0)
+        b.insert_newline()
+        # Cursor is right before `}`, so the new line should get
+        # decreased indent (4 - 4 = 0).
+        self.assertEqual(b.lines[0], "    int x = 0;")
+        self.assertEqual(b.lines[1], "}")
+        self.assertEqual(b.cursor_x, 0)
+
+    def test_yaml_two_space_indent(self):
+        b = Buffer()
+        b.configure_for_language("yaml")
+        self.assertEqual(b.tab_size, 2)
+        b.lines = ["key:"]
+        b.move_to(len("key:"), 0)
+        b.insert_newline()
+        self.assertEqual(b.lines, ["key:", "  "])
+        self.assertEqual(b.cursor_x, 2)
+
+    def test_smart_dedent_on_brace(self):
+        b = Buffer(tab_size=4)
+        b.configure_for_language("c")
+        b.lines = ["    "]
+        b.move_to(4, 0)
+        b.smart_dedent_on_char("}")
+        self.assertEqual(b.lines[0], "}")
+        self.assertEqual(b.cursor_x, 1)
+
+    def test_smart_dedent_skips_nonempty_line(self):
+        b = Buffer(tab_size=4)
+        b.configure_for_language("c")
+        b.lines = ["    return 0;"]
+        b.move_to(11, 0)
+        result = b.smart_dedent_on_char("}")
+        self.assertFalse(result)
+        self.assertEqual(b.lines[0], "    return 0;")
+
+    def test_smart_dedent_noop_without_decrease_re(self):
+        b = Buffer(tab_size=4)
+        b.lines = ["    }"]
+        b.move_to(0, 0)
+        result = b.smart_dedent_on_char("}")
+        self.assertFalse(result)
+
+
 class TestFileIO(unittest.TestCase):
     def test_save_and_load_roundtrip(self):
         with tempfile.TemporaryDirectory() as d:

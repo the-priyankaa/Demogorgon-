@@ -162,6 +162,7 @@ def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extens
     icons_on = icons.enabled_from_env()
 
     language = schema.detect_language(buf.filename or "")
+    buf.configure_for_language(language)
     selecting = False
     meter = PerfMeter(interval=0.5)
     editor = EditorContext(buf, stdscr)
@@ -330,6 +331,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                             render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
                         )
                         if status.startswith("Opened"):
+                            buf.configure_for_language(language)
                             explorer.active = False  # hand focus to the editor
                         # On failure keep tree focus so the user can retry.
                 continue
@@ -352,6 +354,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                             render_unsaved=render,
                         )
                         if open_status.startswith("Opened"):
+                            buf.configure_for_language(language)
                             explorer.active = False
                             status = f"Created + opened {name}"
                         else:
@@ -452,6 +455,9 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                         stdscr, buf, explorer, expanded,
                         render_unsaved=render,
                     )
+                    if status.startswith("Opened"):
+                        buf.configure_for_language(language)
+                        explorer.active = False
             else:
                 status = "Open cancelled"
         elif key == "\x11":  # Ctrl-Q
@@ -494,7 +500,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 buf.delete_selection()
             buf.auto_close_bracket(key)
         elif isinstance(key, str) and key in ")]}":
-            if not buf.skip_closer(key):
+            if not buf.smart_dedent_on_char(key) and not buf.skip_closer(key):
                 buf.insert_char(key)
         elif isinstance(key, str) and key in "\"'" and not buf.has_selection():
             # Quotes use the same lightweight auto-close path as brackets.
@@ -564,13 +570,13 @@ def _draw_status_prompt(stdscr, text: str) -> None:
 HELP_SECTIONS = [
     ("EDITING", [
         "characters          type to insert text at the cursor",
-        "Enter               insert a new line",
-        "Tab                 indent",
+        "Enter               new line (auto-indents per language)",
+        "Tab                 indent (width adapts to the language)",
         "Backspace / Del     delete character",
         "< > ^ v             move cursor",
         "Home / End          jump to line start / end",
         "( { [               auto-close bracket pairs",
-        ") } ]               skip over the auto-typed closer",
+        ") } ]               skip closer / dedent on block close",
         "\" '               auto-close quotes",
     ]),
     ("SELECTION & CLIPBOARD", [

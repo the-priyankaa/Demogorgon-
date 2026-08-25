@@ -41,6 +41,8 @@ class Buffer:
         self.scroll_y = 0
         self.tab_size = tab_size
         self.use_spaces = use_spaces
+        self._increase_re: Optional[re.Pattern] = None
+        self._decrease_re: Optional[re.Pattern] = None
         self.modified = False
         self.large_file_threshold = max(0, large_file_threshold)
         self.large_file_mode = False
@@ -258,6 +260,22 @@ class Buffer:
     def line_count(self) -> int:
         return len(self.lines)
 
+    def configure_for_language(self, language: str) -> None:
+        """Set indent size and auto-indent patterns from language config.
+
+        ``increase_re`` causes insert_newline to add one extra indent level
+        when the line before the cursor matches it (e.g. ``:``, ``{``).
+        ``decrease_re`` causes insert_newline to *remove* one indent level
+        when the text after the cursor matches it (e.g. ``}``).
+        """
+        from .languages.schema import get_indent_spec
+        spec = get_indent_spec(language)
+        self.tab_size = spec.get("size", 4)
+        inc = spec.get("increase")
+        dec = spec.get("decrease")
+        self._increase_re = re.compile(inc) if inc else None
+        self._decrease_re = re.compile(dec) if dec else None
+
     def clamp_cursor(self) -> None:
         self.cursor_y = max(0, min(self.cursor_y, len(self.lines) - 1))
         self.cursor_x = max(0, min(self.cursor_x, len(self.lines[self.cursor_y])))
@@ -358,19 +376,54 @@ class Buffer:
         self._set_content_chars(self._content_chars + len(ch))
         self.modified = True
 
+    def smart_dedent_on_char(self, ch: str) -> bool:
+        """Dedent when a block-closer is typed as the first non-ws char.
+
+        If ``ch`` matches the language's ``decrease`` regex and the line
+        contains only whitespace before the cursor, remove one indent
+        level so the closer aligns with its matching opener.
+
+        Returns True if a dedent was applied (the caller should know
+        the line content has been mutated by this method).
+        """
+        if not self._decrease_re:
+            return False
+        if not re.match(self._decrease_re, ch):
+            return False
+        line = self.lines[self.cursor_y]
+        before_cursor = line[: self.cursor_x]
+        if before_cursor.strip():
+            return False  # there is non-whitespace before cursor — don't touch
+        if not before_cursor:
+            return False  # nothing to dedent
+        # Remove one indent level from the leading whitespace.
+        if self.use_spaces:
+            cut = self.tab_size
+            if len(before_cursor) >= cut:
+                new_before = before_cursor[cut:]
+            else:
+                new_before = ""
+        else:
+            new_before = before_cursor[:-1] if before_cursor.endswith("\t") else ""
+        rest = line[self.cursor_x:]
+        self.lines[self.cursor_y] = new_before + ch + rest
+        self.cursor_x = len(new_before) + 1
+        self._refresh_content_chars()
+        self.modified = True
+        return True
+
     def insert_newline(self) -> None:
         """Split the current line and smart-indent the new line.
 
-        The old implementation only copied the current line's leading
-        whitespace.  For Python that means pressing Enter after ``def``,
-        ``if``, ``for``, ``while`` etc. leaves the cursor at the same
-        indentation level.  Editors normally add one indentation level when
-        the line introduces a block (a line ending in ``:``).
+        Copies the current line's leading whitespace, then applies
+        language-aware indentation rules:
 
-        We deliberately keep this dependency-free and conservative: a
-        trailing colon is treated as a block opener after trimming whitespace.
-        This covers normal Python statements while avoiding a full parser in
-        the buffer layer.
+        - *increase*: if the line before the cursor matches the language's
+          ``increase`` regex (e.g. ``:``, ``{``), one extra indent level is
+          added.
+        - *decrease*: if the text after the cursor matches the language's
+          ``decrease`` regex (e.g. ``}``, ``]``), one indent level is
+          removed from the new line so the closer sits at the right depth.
         """
         if self.has_selection():
             self.delete_selection()
@@ -379,11 +432,20 @@ class Buffer:
         before, after = line[: self.cursor_x], line[self.cursor_x :]
         indent = re.match(r"[ \t]*", before).group(0)
 
-        # Python-style block indentation: ``if x:``, ``def f():``, ``for ...:``
-        # and similar constructs gain one indentation level on Enter.
-        stripped = before.rstrip()
-        if stripped.endswith(":"):
+        # Increase indent when the line introduces a block.
+        if self._increase_re and re.search(self._increase_re, before.rstrip()):
             indent += " " * self.tab_size if self.use_spaces else "\t"
+        elif not self._increase_re and before.rstrip().endswith(":"):
+            # Safe fallback: colon-based indent for unconfigured buffers.
+            indent += " " * self.tab_size if self.use_spaces else "\t"
+        # Decrease indent when the next part starts with a block closer.
+        if (self._decrease_re and after.lstrip()
+                and re.match(self._decrease_re, after.lstrip())):
+            if self.use_spaces:
+                cut = self.tab_size
+                indent = indent[cut:] if len(indent) >= cut else ""
+            else:
+                indent = indent[1:] if indent.startswith("\t") else indent
 
         self.lines[self.cursor_y] = before
         self.lines.insert(self.cursor_y + 1, indent + after)
