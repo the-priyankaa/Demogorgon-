@@ -166,14 +166,14 @@ class TestUndoRedo(unittest.TestCase):
         self.assertEqual(b.lines, ["a"])
         b.undo()  # undo insert_char('a')
         self.assertEqual(b.lines, [""])
-        self.assertFalse(b.undo_mgr.can_undo())
+        self.assertFalse(b.undo())
 
     def test_redo_cleared_by_new_edit(self):
         b = Buffer()
         b.insert_char("a")
         b.undo()
         b.insert_char("b")
-        self.assertFalse(b.undo_mgr.can_redo())
+        self.assertFalse(b.redo())
 
 
 class TestIndentAndTabs(unittest.TestCase):
@@ -187,23 +187,13 @@ class TestIndentAndTabs(unittest.TestCase):
         b.insert_tab()
         self.assertEqual(b.lines, ["\t"])
 
-    def test_indent_dedent_selection(self):
+    def test_indent_selection(self):
         b = Buffer(tab_size=2, use_spaces=True)
         b.lines = ["a", "b"]
         b.move_to(0, 0)
         b.move_to(1, 1, extend_selection=True)
         b.indent_selection()
         self.assertEqual(b.lines, ["  a", "  b"])
-        b.dedent_selection()
-        self.assertEqual(b.lines, ["a", "b"])
-
-    def test_tabs_to_spaces_and_back(self):
-        b = Buffer(tab_size=4, use_spaces=False)
-        b.lines = ["\tfoo"]
-        b.tabs_to_spaces()
-        self.assertEqual(b.lines, ["    foo"])
-        b.spaces_to_tabs()
-        self.assertEqual(b.lines, ["\tfoo"])
 
 
 class TestLanguageIndent(unittest.TestCase):
@@ -343,9 +333,6 @@ class TestCursorMovement(unittest.TestCase):
         self.assertEqual(b.scroll_y, 31)  # 50 - 20 + 1
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 class TestUndoMemoryBudget(unittest.TestCase):
     def test_history_is_bounded_by_memory_budget(self):
         from stdedit.undo import UndoManager
@@ -422,3 +409,7 @@ class TestCompactLargeFileStore(unittest.TestCase):
             b.save()
             with open(path, "rb") as f:
                 self.assertEqual(f.read(), b"a\nB\nc\n")
+
+
+if __name__ == "__main__":
+    unittest.main()

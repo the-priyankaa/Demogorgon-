@@ -8,7 +8,7 @@ the line(s) actually touched/rendered.
 from __future__ import annotations
 
 from array import array
-from typing import Iterable, Iterator, List, Sequence, Union
+from typing import Iterator, List, Sequence, Union
 
 LineIndex = Union[int, slice]
 
@@ -29,36 +29,6 @@ class CompactLines:
         if not lines:
             self._data.clear()
             self._starts = array("I", [0])
-
-    @classmethod
-    def from_normalized_bytes(cls, raw: bytes, encoding: str) -> "CompactLines":
-        obj = cls.__new__(cls)
-        obj._encoding = encoding
-        # Work on a single owned byte buffer.  Normalize CRLF/CR in-place.
-        data = bytearray(raw)
-        if b"\r" in data:
-            write = 0
-            i = 0
-            n = len(data)
-            while i < n:
-                b = data[i]
-                if b == 13:
-                    if i + 1 < n and data[i + 1] == 10:
-                        i += 1
-                    data[write] = 10
-                else:
-                    data[write] = b
-                write += 1
-                i += 1
-            del data[write:]
-        obj._data = data
-        starts = array("Q", [0])
-        for i, b in enumerate(data):
-            if b == 10 and i + 1 <= len(data):
-                starts.append(i + 1)
-        # split("\n") semantics: a trailing newline produces an empty line.
-        obj._starts = starts
-        return obj
 
     def __len__(self) -> int:
         return len(self._starts)
@@ -154,6 +124,3 @@ class CompactLines:
         if isinstance(other, CompactLines):
             return self._encoding == other._encoding and self._data == other._data
         return NotImplemented
-
-    def to_list(self) -> List[str]:
-        return list(self)

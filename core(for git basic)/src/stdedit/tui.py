@@ -12,7 +12,7 @@ Contract with buffer.py (Person B):
   - Buffer is UI-agnostic. Drive it via:
       buf.move_cursor(dx, dy, extend_selection=bool)
       buf.insert_char(ch) / insert_newline() / backspace() / delete_char()
-      buf.insert_tab() / indent_selection() / dedent_selection()
+      buf.insert_tab() / indent_selection()
       buf.copy() / cut() / paste()
       buf.undo() / buf.redo()
       buf.update_scroll(viewport_height, viewport_width)  # call every frame
@@ -64,9 +64,9 @@ class EditorContext:
         self.quit_requested = False
 
 
-def run(buf: Buffer, load_user_extensions: bool = False, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
+def run(buf: Buffer, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
     """Entry point. Wraps curses so the terminal is restored on crash/exit."""
-    curses.wrapper(_curses_main, buf, load_user_extensions, extension_names or [], extension_files or [], load_all_extensions, project_dir)
+    curses.wrapper(_curses_main, buf, extension_names or [], extension_files or [], load_all_extensions, project_dir)
 
 
 def _init_colors() -> None:
@@ -141,7 +141,7 @@ def _read_bracketed_paste(stdscr) -> str:
             return "".join(content)
 
 
-def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
+def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
     """
     TEMPORARY minimal UI — just enough to test buffer.py interactively.
     Person A will replace this with the real thing (line numbers, status
@@ -173,7 +173,7 @@ def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extens
     if buf.filename and os.path.isfile(buf.filename):
         explorer.current_path = os.path.abspath(buf.filename)
     extensions = ExtensionAPI(editor)
-    if load_all_extensions or load_user_extensions:
+    if load_all_extensions:
         loaded, extension_errors = load_extensions(extensions)
     elif extension_names or extension_files:
         loaded, extension_errors = load_requested_extensions(extensions, extension_names or [], extension_files or [])

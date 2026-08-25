@@ -1,6 +1,6 @@
 import unittest
 
-from stdedit.languages.schema import detect_language, tokenize
+from stdedit.languages.schema import detect_language, language_label, tokenize
 
 
 class TestLanguageDetection(unittest.TestCase):
@@ -222,6 +222,18 @@ class TestIndentSpecs(unittest.TestCase):
             spec = get_indent_spec(lang)
             self.assertIn("increase", spec, lang)
             self.assertIn("decrease", spec, lang)
+
+
+class TestLanguageLabels(unittest.TestCase):
+    def test_friendly_names(self):
+        self.assertEqual(language_label("python"), "Python")
+        self.assertEqual(language_label("javascript"), "JavaScript")
+        self.assertEqual(language_label("cpp"), "C++")
+        self.assertEqual(language_label("shell"), "Shell")
+        self.assertEqual(language_label("plaintext"), "Text")
+
+    def test_unknown_language_falls_back_to_text(self):
+        self.assertEqual(language_label("made_up_lang"), "Text")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 import os
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
 
@@ -20,7 +19,7 @@ class TestExtensionAPI(unittest.TestCase):
         api.add_command("inc", lambda e: setattr(e, "value", e.value + 1))
         api.bind_key("x", lambda e, k: setattr(e, "value", e.value + 10) or True)
         api.add_status(lambda e: f"v={e.value}")
-        api.execute("inc")
+        api.commands["inc"](editor)
         self.assertTrue(api.dispatch_key("x"))
         self.assertEqual(editor.value, 11)
         self.assertEqual(api.status(), "v=11")

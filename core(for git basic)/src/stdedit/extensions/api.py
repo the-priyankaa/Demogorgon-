@@ -37,38 +37,18 @@ class ExtensionAPI:
             raise ValueError("command name and callback are required")
         self.commands[name] = callback
 
-    register_command = add_command
-
     def bind_key(self, key: Any, callback: KeyHandler) -> None:
         if not callable(callback):
             raise ValueError("key callback must be callable")
         self.key_handlers.setdefault(key, []).append(callback)
 
-    register_key = bind_key
-
-    def on(self, event: str, callback: Callback) -> None:
-        if event == "startup":
-            self.on_startup.append(callback)
-        elif event == "shutdown":
-            self.on_shutdown.append(callback)
-        else:
-            raise ValueError(f"unsupported event: {event}")
-
     def add_status(self, callback: StatusProvider) -> None:
         self.status_providers.append(callback)
-
-    register_status = add_status
 
     def extension(self, name: str, version: str = "0.1", description: str = "") -> Extension:
         ext = Extension(name, version, description)
         self.loaded.append(ext)
         return ext
-
-    def execute(self, name: str) -> Optional[str]:
-        callback = self.commands.get(name)
-        if callback is None:
-            return None
-        return callback(self.editor)
 
     def dispatch_key(self, key: Any) -> bool:
         handled = False

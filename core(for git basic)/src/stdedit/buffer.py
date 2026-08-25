@@ -108,8 +108,7 @@ class Buffer:
         newline = "\n"
         decoder = None
         if encoding in {"utf-8", "utf-8-sig"}:
-            import codecs as _codecs
-            decoder = _codecs.getincrementaldecoder("utf-8")(errors="strict")
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="strict")
         prev = None
         valid = True
         with open(path, "rb") as f:
@@ -198,36 +197,30 @@ class Buffer:
         if not target:
             raise ValueError("No filename to save to")
         if isinstance(self._lines, MappedLines):
-            # Unmodified mapped files can be copied without materializing the
-            # document; modified mapped files normally materialize on the edit.
             enc = "utf-8" if self.encoding == "utf-8-sig" else self.encoding
             if target == self.filename and not self.modified:
-                # Nothing to write; the mapped file is already the saved file.
                 pass
             else:
-                with open(target, "wb") as f:
-                    if self.encoding == "utf-8-sig":
-                        f.write(codecs.BOM_UTF8)
-                    for i, line in enumerate(self._lines):
-                        f.write(line.encode(enc))
-                        if i + 1 < len(self._lines):
-                            f.write(self.newline.encode(enc))
+                self._write_encoded(target, enc)
         elif isinstance(self._lines, CompactLines):
             enc = "utf-8" if self.encoding == "utf-8-sig" else self.encoding
-            newline = self.newline.encode(enc)
-            with open(target, "wb") as f:
-                if self.encoding == "utf-8-sig":
-                    f.write(codecs.BOM_UTF8)
-                for i, line in enumerate(self._lines):
-                    f.write(line.encode(enc))
-                    if i + 1 < len(self._lines):
-                        f.write(newline)
+            self._write_encoded(target, enc)
         else:
             text = self.newline.join(self._lines)
             with open(target, "w", encoding=self.encoding, newline="") as f:
                 f.write(text)
         self.filename = target
         self.modified = False
+
+    def _write_encoded(self, target: str, enc: str) -> None:
+        newline = self.newline.encode(enc)
+        with open(target, "wb") as f:
+            if self.encoding == "utf-8-sig":
+                f.write(codecs.BOM_UTF8)
+            for i, line in enumerate(self._lines):
+                f.write(line.encode(enc))
+                if i + 1 < len(self._lines):
+                    f.write(newline)
 
     # ------------------------------------------------------------------ #
     # Basic accessors / cursor movement
@@ -337,8 +330,7 @@ class Buffer:
             self.undo_mgr.checkpoint(self.lines, self.cursor_x, self.cursor_y)
         self._last_action = action
 
-    def undo(self) -> bool:
-        snap = self.undo_mgr.undo(self.lines, self.cursor_x, self.cursor_y)
+    def _restore_snapshot(self, snap) -> bool:
         if snap is None:
             return False
         self.lines = list(snap.lines)
@@ -350,18 +342,15 @@ class Buffer:
         self.modified = True
         return True
 
+    def undo(self) -> bool:
+        return self._restore_snapshot(
+            self.undo_mgr.undo(self.lines, self.cursor_x, self.cursor_y)
+        )
+
     def redo(self) -> bool:
-        snap = self.undo_mgr.redo(self.lines, self.cursor_x, self.cursor_y)
-        if snap is None:
-            return False
-        self.lines = list(snap.lines)
-        self.cursor_x, self.cursor_y = snap.cursor_x, snap.cursor_y
-        self.selection_anchor = None
-        self._last_action = None
-        self.clamp_cursor()
-        self._refresh_content_chars()
-        self.modified = True
-        return True
+        return self._restore_snapshot(
+            self.undo_mgr.redo(self.lines, self.cursor_x, self.cursor_y)
+        )
 
     # ------------------------------------------------------------------ #
     # Editing
@@ -632,25 +621,6 @@ class Buffer:
         self._refresh_content_chars()
         self.modified = True
 
-    def dedent_selection(self) -> None:
-        sel = self._normalized_selection()
-        rng = range(sel[0], sel[2] + 1) if sel else [self.cursor_y]
-        self._checkpoint_if_needed("dedent_selection")
-        for i in rng:
-            line = self.lines[i]
-            if line.startswith("\t"):
-                self.lines[i] = line[1:]
-            else:
-                strip = 0
-                for ch in line[: self.tab_size]:
-                    if ch == " ":
-                        strip += 1
-                    else:
-                        break
-                self.lines[i] = line[strip:]
-        self._refresh_content_chars()
-        self.modified = True
-
     # ------------------------------------------------------------------ #
     # Clipboard (internal — stdlib only, no OS clipboard dependency)
     # ------------------------------------------------------------------ #
@@ -722,27 +692,4 @@ class Buffer:
             self.cursor_y = insert_at + len(middle)
             self.cursor_x = len(parts[-1])
         self._set_content_chars(self._content_chars + len(text))
-        self.modified = True
-
-    # ------------------------------------------------------------------ #
-    # Tabs <-> spaces (whole-buffer conversion)
-    # ------------------------------------------------------------------ #
-    def tabs_to_spaces(self) -> None:
-        self._checkpoint_if_needed("tabs_to_spaces")
-        self.lines = [line.expandtabs(self.tab_size) for line in self.lines]
-        self.use_spaces = True
-        self._refresh_content_chars()
-        self.modified = True
-
-    def spaces_to_tabs(self) -> None:
-        self._checkpoint_if_needed("spaces_to_tabs")
-        new_lines = []
-        for line in self.lines:
-            leading = re.match(r"^( *)", line).group(1)
-            rest = line[len(leading) :]
-            tabs, remainder = divmod(len(leading), self.tab_size)
-            new_lines.append(("\t" * tabs) + (" " * remainder) + rest)
-        self.lines = new_lines
-        self.use_spaces = False
-        self._refresh_content_chars()
         self.modified = True

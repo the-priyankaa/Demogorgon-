@@ -15,7 +15,7 @@ import sys
 
 from .buffer import Buffer
 from . import tui
-from .extensions import discover, extension_dirs, load_requested_extensions
+from .extensions import discover, extension_dirs
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -146,7 +146,6 @@ def main(argv=None) -> int:
 
     tui.run(
         buf,
-        load_user_extensions=False,
         extension_names=extension_names,
         extension_files=extension_files,
         load_all_extensions=args.all_extensions,

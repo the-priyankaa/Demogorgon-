@@ -22,7 +22,6 @@ import stdedit
 importlib.import_module('stdedit.buffer')
 importlib.import_module('stdedit.undo')
 importlib.import_module('stdedit.tui')
-importlib.import_module('stdedit.search')
 importlib.import_module('stdedit.languages.schema')
 after = set(sys.modules)
 

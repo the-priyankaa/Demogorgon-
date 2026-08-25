@@ -110,9 +110,3 @@ class UndoManager:
         self._history_bytes += current.estimated_bytes
         self._trim()
         return nxt
-
-    def can_undo(self) -> bool:
-        return bool(self._undo_stack)
-
-    def can_redo(self) -> bool:
-        return bool(self._redo_stack)

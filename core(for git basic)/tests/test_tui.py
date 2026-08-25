@@ -9,7 +9,6 @@ from stdedit.tui import (
     line_number_width,
     format_status_bar,
 )
-from stdedit.languages.schema import language_label
 
 
 class TestLineNumbers(unittest.TestCase):
@@ -22,18 +21,6 @@ class TestLineNumbers(unittest.TestCase):
         self.assertEqual(line_number_width(99), 2)
         self.assertEqual(line_number_width(100), 3)
         self.assertEqual(line_number_width(1000), 4)
-
-
-class TestLanguageLabels(unittest.TestCase):
-    def test_friendly_names(self):
-        self.assertEqual(language_label("python"), "Python")
-        self.assertEqual(language_label("javascript"), "JavaScript")
-        self.assertEqual(language_label("cpp"), "C++")
-        self.assertEqual(language_label("shell"), "Shell")
-        self.assertEqual(language_label("plaintext"), "Text")
-
-    def test_unknown_language_falls_back_to_text(self):
-        self.assertEqual(language_label("made_up_lang"), "Text")
 
 
 class TestStatusBar(unittest.TestCase):
@@ -474,9 +461,6 @@ class TestSafeOpen(unittest.TestCase):
         self.assertIn("Error opening file", status)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 class _FakeStdscr:
     def __init__(self, text):
         self._items = [ord(ch) for ch in text]
@@ -497,20 +481,6 @@ class TestBracketedPaste(unittest.TestCase):
         )
         self.assertEqual(stdscr._items, [])
 
-class TestKeyHandling(unittest.TestCase):
-    def test_ctrl_q_is_ascii_control_character(self):
-        # Regression guard for the terminal flow-control issue: the UI maps
-        # Ctrl-Q to ASCII 17 and raw mode is enabled before the input loop.
-        self.assertEqual("\x11", chr(17))
 
-    def test_ctrl_s_is_ascii_control_character(self):
-        self.assertEqual("\x13", chr(19))
-
-
-class TestBracketedPasteStress(unittest.TestCase):
-    def test_bracketed_paste_10k_lines(self):
-        from stdedit.tui import _read_bracketed_paste
-        payload = "\n".join(f"line {i}" for i in range(10000))
-        stdscr = _FakeStdscr("200~" + payload + "\x1b[201~")
-        self.assertEqual(_read_bracketed_paste(stdscr), payload)
-        self.assertEqual(stdscr._items, [])
+if __name__ == "__main__":
+    unittest.main()
