@@ -142,13 +142,16 @@ class TestHelpContent(unittest.TestCase):
             "Ctrl-Y", "Ctrl-S", "Ctrl-O", "Ctrl-Q", "Ctrl-E", "Ctrl-H",
             "F1", "Enter", "Tab", "Backspace", "Home", "End",
             "h ", "n ", "N ", "O ", "R ",
+            "( { [", ") } ]", "auto-close quotes",
+            "bracketed paste", "Esc cancels", "prompt Backspace",
         ):
             self.assertIn(token, text, token)
 
     def test_covers_all_sections_and_dismissal(self):
         text = "\n".join(build_help_lines(200))
         for section in ("EDITING", "SELECTION & CLIPBOARD",
-                        "HISTORY & FILES", "FILE TREE", "HELP"):
+                        "HISTORY & FILES", "FILE TREE",
+                        "TERMINAL & PROMPTS", "HELP"):
             self.assertIn(section, text)
         self.assertIn("q / Esc / Enter", text)
 
@@ -251,6 +254,30 @@ class TestTreeSwallow(unittest.TestCase):
                     curses.KEY_DOWN, curses.KEY_BACKSPACE, curses.KEY_F1,
                     None):
             self.assertFalse(swallowed_by_tree(key), repr(key))
+
+
+class TestHelpScroll(unittest.TestCase):
+    def test_clamp_scroll_bounds(self):
+        from stdedit.tui import clamp_scroll
+
+        # total 50 lines, viewport 20 -> max offset 30
+        self.assertEqual(clamp_scroll(0, 1, 50, 20), 1)
+        self.assertEqual(clamp_scroll(0, -1, 50, 20), 0)
+        self.assertEqual(clamp_scroll(29, 5, 50, 20), 30)
+        self.assertEqual(clamp_scroll(30, 5, 50, 20), 30)   # bottom clamp
+        self.assertEqual(clamp_scroll(0, -99, 50, 20), 0)   # top clamp
+
+    def test_clamp_scroll_fits_without_scrolling(self):
+        from stdedit.tui import clamp_scroll
+
+        # Content shorter than the viewport never scrolls.
+        self.assertEqual(clamp_scroll(0, 10, 12, 20), 0)
+
+    def test_clamp_scroll_degenerate_viewports(self):
+        from stdedit.tui import clamp_scroll
+
+        self.assertEqual(clamp_scroll(5, 1, 50, 0), 0)
+        self.assertEqual(clamp_scroll(5, 1, 0, 20), 0)
 
 
 class TestSafeOpen(unittest.TestCase):

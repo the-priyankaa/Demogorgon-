@@ -246,7 +246,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             pass
 
         if show_help:
-            _draw_help_overlay(stdscr, build_help_lines(width))
+            _draw_help_overlay(stdscr, build_help_lines(width),
+                               help_scroll)
 
         stdscr.move(
             buf.cursor_y - buf.scroll_y,
@@ -263,10 +264,24 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         # The help guide outranks every other binding (Ctrl-H / F1).
         if is_help_toggle(key, explorer.visible and explorer.active):
             show_help = not show_help
+            if show_help:
+                help_scroll = 0  # always open at the top
             continue
         if show_help:
-            # Deliberate dismissal only; other keys are swallowed.
-            if key in ("q", "\x1b", "\n", "\r"):
+            # Scroll, deliberate dismissal; other keys are swallowed.
+            total = len(build_help_lines(width))
+            view_h = max(1, height - 2)
+            if key == curses.KEY_UP:
+                help_scroll = clamp_scroll(help_scroll, -1, total, view_h)
+            elif key == curses.KEY_DOWN:
+                help_scroll = clamp_scroll(help_scroll, 1, total, view_h)
+            elif key == curses.KEY_PPAGE:
+                help_scroll = clamp_scroll(help_scroll, -view_h, total,
+                                           view_h)
+            elif key == curses.KEY_NPAGE:
+                help_scroll = clamp_scroll(help_scroll, view_h, total,
+                                           view_h)
+            elif key in ("q", "\x1b", "\n", "\r"):
                 show_help = False
             continue
 
@@ -519,6 +534,9 @@ HELP_SECTIONS = [
         "Backspace / Del     delete character",
         "< > ^ v             move cursor",
         "Home / End          jump to line start / end",
+        "( { [               auto-close bracket pairs",
+        ") } ]               skip over the auto-typed closer",
+        "\" '               auto-close quotes",
     ]),
     ("SELECTION & CLIPBOARD", [
         "Ctrl-Space          start / stop selection ([SELECT] in status)",
@@ -545,6 +563,13 @@ HELP_SECTIONS = [
         "O                   pick project root via system dialog",
         "R                   reveal root in system file manager",
         "Tab / Esc           focus the editor",
+    ]),
+    ("TERMINAL & PROMPTS", [
+        "terminal paste      bracketed paste inserts multi-line text",
+        "typed prompts       Enter confirms, Esc cancels",
+        "prompt Backspace    edits the text (new file/folder, open path)",
+        "",
+        "(prompts appear for n / N / Ctrl-O and the O path fallback)",
     ]),
     ("HELP", [
         "Ctrl-H or F1        open / close this guide",
@@ -594,13 +619,29 @@ def swallowed_by_tree(key) -> bool:
     return isinstance(key, str) and len(key) == 1 and key.isprintable()
 
 
-def _draw_help_overlay(stdscr, lines):
-    """Paint a centered bordered help box over the current frame."""
+def clamp_scroll(offset, delta, total, view_h):
+    """New scroll offset after moving `delta` rows, clamped to content.
+
+    Keeps the viewport inside [0, max(total - view_h, 0)] so the guide
+    can never scroll past its own text on any terminal size.
+    """
+    if total <= 0 or view_h <= 0:
+        return 0
+    return max(0, min(offset + delta, max(total - view_h, 0)))
+
+
+def _draw_help_overlay(stdscr, lines, offset=0):
+    """Paint a centered bordered help box over the current frame.
+
+    `offset` scrolls through `lines` when they exceed the terminal
+    height; ▲/▼ corner markers signal hidden content above/below.
+    """
     height, width = stdscr.getmaxyx()
     inner_w = max(3, min(max([len(l) for l in lines] or [20]) + 4,
                          width - 2))
     body_h = len(lines)
-    box_h = min(body_h + 2, height)
+    view_h = max(1, min(body_h, height - 2))
+    box_h = view_h + 2
     top = max(0, (height - box_h) // 2)
     left = max(0, (width - inner_w) // 2)
 
@@ -610,16 +651,22 @@ def _draw_help_overlay(stdscr, lines):
         except curses.error:
             pass
 
-    title = " stdedit help - q/Esc/Enter to close "
+    title = " stdedit help - q/Esc/Enter close \u00b7 arrows scroll "
     fill = max(inner_w - 2 - len(title), 0)
     put(top, left, "\u250c" + "\u2500" * fill + title + "\u2500" *
         (inner_w - 2 - fill - len(title)) + "\u2510", curses.A_REVERSE)
-    for i in range(box_h - 2):
-        text = lines[i] if i < body_h else ""
+    for i in range(view_h):
+        text = lines[offset + i] if offset + i < body_h else ""
         put(top + 1 + i, left, "\u2502" + " " * inner_w + "\u2502")
         put(top + 1 + i, left + 2, text.rstrip())
     put(top + box_h - 1, left,
         "\u2514" + "\u2500" * (inner_w - 2) + "\u2518")
+    # Scroll indicators: ▲ above, ▼ below.
+    if offset > 0:
+        put(top, left + inner_w - 1, "\u25b2", curses.A_REVERSE)
+    if offset + view_h < body_h:
+        put(top + box_h - 1, left + inner_w - 1, "\u25bc",
+            curses.A_REVERSE)
 
 
 # ---------------------------------------------------------------------- #
