@@ -304,6 +304,45 @@ class TestHelpScroll(unittest.TestCase):
         self.assertEqual(clamp_scroll(5, 1, 0, 20), 0)
 
 
+class TestIcons(unittest.TestCase):
+    def test_language_icons_cover_supported_languages(self):
+        from stdedit.icons import LANG_ICONS, icon_for_language
+
+        for lang in ("python", "javascript", "typescript", "html", "css",
+                     "c", "cpp", "java", "rust", "go", "json", "yaml",
+                     "markdown", "shell", "sql", "xml", "plaintext"):
+            self.assertTrue(LANG_ICONS[lang], lang)
+            self.assertEqual(icon_for_language(lang.upper(), True),
+                             LANG_ICONS[lang])
+
+    def test_disabled_icons_return_empty(self):
+        from stdedit.icons import enabled_from_env, icon_for_file, \
+            icon_for_language
+
+        self.assertEqual(icon_for_file("x.py", False), "")
+        self.assertEqual(icon_for_language("python", False), "")
+        self.assertFalse(enabled_from_env({"STDEDIT_ICONS": "0"}))
+        self.assertTrue(enabled_from_env({}))
+        self.assertTrue(enabled_from_env({"STDEDIT_ICONS": "1"}))
+
+    def test_extension_and_default_icons(self):
+        from stdedit.icons import DEFAULT_ICON, icon_for_file
+
+        self.assertEqual(icon_for_file("Cargo.lock", True), "\uF023")
+        self.assertEqual(icon_for_file("pic.PNG", True), "\uF1C5")
+        self.assertEqual(icon_for_file("setup.cfg", True), "\uF013")
+        self.assertEqual(icon_for_file("unknown.xyz", True), DEFAULT_ICON)
+
+    def test_status_bar_renders_icon_inside_brackets(self):
+        from stdedit.tui import format_status_bar
+
+        line = format_status_bar("main.py", False, "Python", 0, 0, 10,
+                                 icon="\uE73C")
+        self.assertIn("[\uE73C Python]", line)
+        plain = format_status_bar("main.py", False, "Python", 0, 0, 10)
+        self.assertIn("[Python]", plain)
+
+
 class TestSafeOpen(unittest.TestCase):
     def setUp(self):
         import tempfile

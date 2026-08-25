@@ -36,6 +36,7 @@ from .perf import PerfMeter
 from .extensions import ExtensionAPI, load_extensions, load_requested_extensions
 from .explorer import FileExplorer
 from . import filemanager
+from . import icons
 
 _COLOR_PAIRS = {
     "keyword": 1,
@@ -158,6 +159,7 @@ def _curses_main(stdscr, buf: Buffer, load_user_extensions: bool = False, extens
     stdscr.keypad(True)
     _init_colors()
     _enable_bracketed_paste()
+    icons_on = icons.enabled_from_env()
 
     language = schema.detect_language(buf.filename or "")
     selecting = False
@@ -203,7 +205,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         # Draw file explorer if visible
         if explorer.visible:
-            _draw_explorer(stdscr, explorer, text_height, explorer_width)
+            _draw_explorer(stdscr, explorer, text_height, explorer_width,
+                           icons_on)
 
         gutter_width = line_number_width(len(buf.lines)) + 2
         text_width = max(1, width - explorer_width - gutter_width)
@@ -239,6 +242,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             meter_label=meter.label(),
             extension_status=extensions.status(),
             transient_status=status,
+            icon=icons.icon_for_language(schema.language_label(language), icons_on),
         )[: width - 1]
         try:
             stdscr.addstr(height - 1, 0, status_line, curses.A_REVERSE)
@@ -600,8 +604,10 @@ HELP_SECTIONS = [
         "terminal paste      bracketed paste inserts multi-line text",
         "typed prompts       Enter confirms, Esc cancels",
         "prompt Backspace    edits the text (new file/folder, open path)",
+        "icons               Nerd Font glyphs (e.g. MesloLGS NF);",
+        "                    disable with STDEDIT_ICONS=0",
         "",
-        "(prompts appear for n / N / Ctrl-O and the O path fallback)",
+        "(prompts appear for n / Ctrl-O and the O path fallback)",
     ]),
     ("HELP", [
         "Ctrl-H or F1        open / close this guide",
@@ -837,12 +843,14 @@ def format_status_bar(
     meter_label="",
     extension_status="",
     transient_status="",
+    icon="",
 ) -> str:
     """Build the status bar text.
 
     Pure function (no curses access) so it can be unit tested. Shows the
     open file name with a dirty marker, the human-readable file type, cursor
     position and scroll percentage, plus optional mode/meter/extension info.
+    `icon` (a Nerd Font glyph) is rendered inside the type brackets when set.
     """
     name = f"{filename or '[No Name]'}{'*' if modified else ''}"
     sel_flag = " [SELECT]" if selecting else ""
@@ -854,7 +862,7 @@ def format_status_bar(
     else:
         pct_text = ""
     parts = [
-        f"{name}  [{label}]  Ln {cursor_y + 1}, Col {cursor_x + 1}{sel_flag}{large_flag}{match_flag}{pct_text}"
+        f"{name}  [{icon + ' ' if icon else ''}{label}]  Ln {cursor_y + 1}, Col {cursor_x + 1}{sel_flag}{large_flag}{match_flag}{pct_text}"
     ]
     if meter_label:
         parts.append(meter_label)
@@ -865,7 +873,8 @@ def format_status_bar(
     return "   ".join(parts)
 
 
-def _draw_explorer(stdscr, explorer: FileExplorer, height: int, width: int) -> None:
+def _draw_explorer(stdscr, explorer: FileExplorer, height: int, width: int,
+                   icons_on: bool = False) -> None:
     """Draw the file explorer panel on the left side."""
     # Draw vertical separator
     for row in range(height):
@@ -884,7 +893,9 @@ def _draw_explorer(stdscr, explorer: FileExplorer, height: int, width: int) -> N
             break
         depth, name, path, is_dir = visible_items[row]
         indent = "  " * depth
-        display = f"{indent}{name}"[:width - 2]
+        prefix = "" if is_dir or path == ".." else (
+            icons.icon_for_file(path, icons_on) + " " if icons_on else "")
+        display = f"{indent}{prefix}{name}"[:width - 2]
 
         attr = curses.A_REVERSE if row == explorer.selected_idx else 0
         if is_dir and row != explorer.selected_idx:
