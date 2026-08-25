@@ -94,6 +94,7 @@ Newly imported modules:
  - stdedit.languages.schema
  - stdedit.mapped
  - stdedit.perf
+ - stdedit.settings
  - stdedit.tui
  - stdedit.undo
  - subprocess

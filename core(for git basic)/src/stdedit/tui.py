@@ -29,6 +29,7 @@ from __future__ import annotations
 import curses
 import os
 import sys
+import time
 
 from .buffer import Buffer
 from .languages import schema
@@ -37,6 +38,7 @@ from .extensions import ExtensionAPI, load_extensions, load_requested_extensions
 from .explorer import FileExplorer
 from . import filemanager
 from . import icons
+from . import settings
 
 _COLOR_PAIRS = {
     "keyword": 1,
@@ -213,6 +215,11 @@ def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None
 
 def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext, explorer: FileExplorer, icons_on: bool = False) -> None:
     show_help = False
+    show_settings = False
+    settings_idx = 0
+    _last_edit_time = time.time()
+    _last_save_time = time.time()
+    _auto_save_flag = False
     while True:
         frame_started = meter.frame_start()
         stdscr.erase()
@@ -275,6 +282,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         if show_help:
             _draw_help_overlay(stdscr, build_help_lines(width),
                                help_scroll)
+        if show_settings:
+            _draw_settings_overlay(stdscr, settings_idx)
 
         stdscr.move(
             buf.cursor_y - buf.scroll_y,
@@ -284,9 +293,24 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         meter.frame_end(frame_started)
         status = ""
 
+        _prev_modified = buf.modified
         key = _get_key(stdscr)
         if key is None:
             continue
+
+        # Check auto-save conditions on every key event.
+        now = time.time()
+        if buf.modified and buf.filename:
+            saved = False
+            if settings.get("auto_save_idle") and now - _last_edit_time >= 5:
+                buf.save()
+                saved = True
+            elif settings.get("auto_save_periodic") and now - _last_save_time >= 30:
+                buf.save()
+                saved = True
+            if saved:
+                _last_save_time = now
+                status = "Auto-saved"
 
         # --- Mouse events (before all other key handling) ---
         if isinstance(key, tuple) and key[0] == "__mouse__":
@@ -343,6 +367,23 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                                            view_h)
             elif key in ("q", "\x1b", "\n", "\r"):
                 show_help = False
+            continue
+
+        # Settings overlay (Ctrl-P).
+        if key == "\x10" and not explorer.searching:
+            show_settings = not show_settings
+            settings_idx = 0
+            continue
+        if show_settings:
+            n_items = len(settings.LABELS)
+            if key == curses.KEY_UP:
+                settings_idx = (settings_idx - 1) % n_items
+            elif key == curses.KEY_DOWN:
+                settings_idx = (settings_idx + 1) % n_items
+            elif key in (" ", "\n", "\r"):
+                settings.toggle(settings.LABELS[settings_idx][0])
+            elif key in ("\x1b", "\x10", "q"):
+                show_settings = False
             continue
 
         editor.status = status
@@ -591,7 +632,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             if result:
                 status = result
         elif key == "\x11":  # Ctrl-Q
-            if buf.modified:
+            if buf.modified and not settings.any_auto_save():
                 status = "Unsaved changes — Ctrl-Q again to force quit, Ctrl-S to save"
                 stdscr.addstr(height - 1, 0, status[: width - 1], curses.A_REVERSE)
                 stdscr.refresh()
@@ -669,6 +710,14 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         elif isinstance(key, str) and key.isprintable():
             buf.insert_char(key)
         # anything else (unmapped function keys etc.) is ignored for now
+
+        # Track last edit time for idle auto-save.
+        if buf.modified and not _prev_modified:
+            _last_edit_time = time.time()
+            if settings.get("auto_save_on_edit") and buf.filename:
+                buf.save()
+                _last_save_time = time.time()
+                status = "Auto-saved"
 
 
 def line_number_width(line_count: int) -> int:
@@ -888,6 +937,7 @@ HELP_SECTIONS = [
         "Ctrl-Z              undo",
         "Ctrl-Y              redo",
         "Ctrl-S              save current file",
+        "Ctrl-P              settings / preferences",
         "Ctrl-O              open a file by typed path (~ supported;",
         "                    offers to create it if missing)",
         "Ctrl-Q              quit (press again to force with changes)",
@@ -1012,6 +1062,40 @@ def _draw_help_overlay(stdscr, lines, offset=0):
     if offset + view_h < body_h:
         put(top + box_h - 1, left + inner_w - 1, "\u25bc",
             curses.A_REVERSE)
+
+
+def _draw_settings_overlay(stdscr, selected_idx: int) -> None:
+    """Paint a centered bordered settings box with toggleable options."""
+    height, width = stdscr.getmaxyx()
+    items = settings.LABELS
+    body_h = len(items) + 1  # +1 for hint line
+    inner_w = max(3, min(max(len(label) for _, label in items) + 8, width - 2))
+    box_h = body_h + 2
+    top = max(0, (height - box_h) // 2)
+    left = max(0, (width - inner_w) // 2)
+
+    def put(row, col, text, attr=0):
+        try:
+            stdscr.addstr(row, col, text[:width - col], attr)
+        except curses.error:
+            pass
+
+    title = " Settings "
+    fill = max(inner_w - 2 - len(title), 0)
+    put(top, left, "\u250c" + "\u2500" * fill + title + "\u2500" *
+        (inner_w - 2 - fill - len(title)) + "\u2510", curses.A_REVERSE)
+    for i, (key, label) in enumerate(items):
+        checked = "[x]" if settings.get(key) else "[ ]"
+        line = f" {checked} {label}"
+        attr = curses.A_REVERSE if i == selected_idx else 0
+        put(top + 1 + i, left, "\u2502" + " " * inner_w + "\u2502")
+        put(top + 1 + i, left + 1, line[:inner_w - 2], attr)
+    # Hint line
+    hint = " \u2191\u2193 navigate  Space toggle  Esc close "
+    put(top + 1 + len(items), left, "\u2502" + " " * inner_w + "\u2502")
+    put(top + 1 + len(items), left + 1, hint[:inner_w - 2], curses.A_DIM)
+    put(top + box_h - 1, left,
+        "\u2514" + "\u2500" * (inner_w - 2) + "\u2518")
 
 
 # ---------------------------------------------------------------------- #
