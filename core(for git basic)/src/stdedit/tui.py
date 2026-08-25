@@ -933,17 +933,33 @@ def _draw_explorer(stdscr, explorer: FileExplorer, height: int, width: int,
         except curses.error:
             pass
 
-    # Search mode header
+    # Search mode: 3-row area at the top (label, input, separator)
     if explorer.searching:
-        header = f" /{explorer.search_query}"[:width - 2]
+        # Row 0: label
+        label = " Search "
         try:
-            stdscr.addstr(0, 0, header.ljust(width - 2)[:width - 2],
+            stdscr.addstr(0, 0, label.ljust(width - 2)[:width - 2],
                           curses.A_REVERSE | curses.A_BOLD)
         except curses.error:
             pass
-        # Offset items below the header
-        draw_height = height - 1
-        item_offset = 1
+        # Row 1: input field with cursor
+        query_text = f" /{explorer.search_query}"
+        cursor = "_"
+        field = (query_text + cursor)[:width - 2]
+        try:
+            stdscr.addstr(1, 0, field.ljust(width - 2)[:width - 2],
+                          curses.A_REVERSE | curses.A_BOLD)
+        except curses.error:
+            pass
+        # Row 2: separator line
+        sep = " " + "~" * (width - 3)
+        try:
+            stdscr.addstr(2, 0, sep[:width - 2], curses.A_REVERSE | curses.A_BOLD)
+        except curses.error:
+            pass
+        # Offset items below the 3-row search area
+        draw_height = height - 3
+        item_offset = 3
     else:
         draw_height = height
         item_offset = 0
