@@ -267,7 +267,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             continue
 
         # The help guide outranks every other binding (Ctrl-H / F1).
-        if is_help_toggle(key, explorer.visible and explorer.active):
+        if is_help_toggle(key, explorer.visible and explorer.active) and not explorer.searching:
             show_help = not show_help
             if show_help:
                 help_scroll = 0  # always open at the top
