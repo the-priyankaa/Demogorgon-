@@ -1140,12 +1140,14 @@ HELP_SECTIONS = [
 def build_help_lines(width):
     """Pure helper: help overlay content fitted to `width` columns."""
     out = []
+    limit = max(10, int(width))
     for title, entries in HELP_SECTIONS:
         out.append(title)
+        sep = "\u2550" * min(len(title), limit - 2)
+        out.append(sep)
         for entry in entries:
             out.append("  " + entry)
         out.append("")
-    limit = max(10, int(width))
     return [line[:limit] for line in out]
 
 
@@ -1223,7 +1225,14 @@ def _draw_help_overlay(stdscr, lines, offset=0):
     for i in range(view_h):
         text = lines[offset + i] if offset + i < body_h else ""
         put(top + 1 + i, left, "\u2502" + " " * inner_w + "\u2502")
-        put(top + 1 + i, left + 2, text.rstrip())
+        stripped = text.rstrip()
+        if stripped and all(c == "\u2550" for c in stripped):
+            attr = curses.A_BOLD
+        elif stripped and not stripped.startswith(" "):
+            attr = curses.A_BOLD
+        else:
+            attr = 0
+        put(top + 1 + i, left + 2, stripped, attr)
     put(top + box_h - 1, left,
         "\u2514" + "\u2500" * (inner_w - 2) + "\u2518")
     # Scroll indicators: ▲ above, ▼ below.
