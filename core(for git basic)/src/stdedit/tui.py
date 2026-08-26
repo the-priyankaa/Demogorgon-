@@ -250,62 +250,63 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             _draw_explorer(stdscr, explorer, text_height, explorer_width,
                            icons_on)
 
-        # Draw git panel if visible
-        if git_panel and git_panel.visible:
-            if git_panel.mode == "diff":
-                # Diff overlay mode — load diff if needed and draw full overlay
-                if diff_viewer and not diff_viewer.diff_text:
-                    diff_text = git_panel.get_selected_diff()
-                    f = git_panel.selected_file()
-                    title = f.path if f else "diff"
-                    diff_viewer.load(diff_text, title=title)
-                if diff_viewer:
-                    draw_diff_overlay(stdscr, diff_viewer, height, width)
-                    stdscr.move(height - 1, 0)
-                    status_line = format_status_bar(
-                        filename=buf.filename, modified=buf.modified,
-                        label=schema.language_label(language),
-                        cursor_y=buf.cursor_y, cursor_x=buf.cursor_x,
-                        total_lines=len(buf.lines), selected_line=buf.cursor_y,
-                        scroll_y=buf.scroll_y, viewport_height=text_height,
-                        finding=finding, git_branch=_git_branch,
-                        git_counts=_git_counts, width=width,
-                    )
-                    stdscr.addstr(height - 1, 0, status_line[:width - 1],
-                                  curses.A_REVERSE | curses.A_BOLD)
-                    try:
-                        stdscr.move(buf.cursor_y - buf.scroll_y, 0)
-                    except curses.error:
-                        pass
-                    if frame_started:
-                        meter.frame_end()
-                    continue
-            else:
-                draw_git_panel(stdscr, git_panel, text_height, git_panel_width)
+        # Handle diff overlay early (covers full screen)
+        if git_panel and git_panel.visible and git_panel.mode == "diff":
+            if diff_viewer and not diff_viewer.diff_text:
+                diff_text = git_panel.get_selected_diff()
+                f = git_panel.selected_file()
+                title = f.path if f else "diff"
+                diff_viewer.load(diff_text, title=title)
+            if diff_viewer:
+                draw_diff_overlay(stdscr, diff_viewer, height, width)
+                stdscr.move(height - 1, 0)
+                status_line = format_status_bar(
+                    filename=buf.filename, modified=buf.modified,
+                    label=schema.language_label(language),
+                    cursor_y=buf.cursor_y, cursor_x=buf.cursor_x,
+                    line_count=len(buf.lines),
+                    width=width,
+                    git_branch=_git_branch, git_counts=_git_counts,
+                )
+                stdscr.addstr(height - 1, 0, status_line[:width - 1],
+                              curses.A_REVERSE | curses.A_BOLD)
+                try:
+                    stdscr.move(buf.cursor_y - buf.scroll_y, 0)
+                except curses.error:
+                    pass
+                if frame_started:
+                    meter.frame_end(frame_started)
+                continue
 
         gutter_width = line_number_width(len(buf.lines)) + 2
-        text_width = max(1, width - explorer_width - git_panel_width - gutter_width)
+        text_width = max(1, width - explorer_width - gutter_width - git_panel_width)
 
         buf.update_scroll(text_height, text_width)
 
         for row in range(text_height):
             line_idx = buf.scroll_y + row
-            _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width, x_offset=explorer_width + git_panel_width)
+            _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width, x_offset=explorer_width)
             if line_idx >= len(buf.lines):
                 continue
             line = buf.lines[line_idx]
             _draw_line(
                 stdscr, row, line, buf.scroll_x, text_width, language,
-                x_offset=gutter_width + explorer_width + git_panel_width,
+                x_offset=gutter_width + explorer_width,
             )
             _highlight_selection(
                 stdscr, row, line_idx, line, buf,
-                scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width + explorer_width + git_panel_width,
+                scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width + explorer_width,
             )
             _highlight_find_match(
                 stdscr, row, line_idx, text_width, buf.scroll_x,
-                gutter_width + explorer_width + git_panel_width,
+                gutter_width + explorer_width,
             )
+
+        # Draw git panel on the RIGHT side (after editor content)
+        if git_panel and git_panel.visible:
+            git_panel_x = explorer_width + gutter_width + text_width
+            draw_git_panel(stdscr, git_panel, text_height, git_panel_width,
+                           x_offset=git_panel_x)
 
         match = buf.matching_bracket()
 
@@ -355,7 +356,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         stdscr.move(
             buf.cursor_y - buf.scroll_y,
-            explorer_width + git_panel_width + gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
+            explorer_width + gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
         )
         stdscr.refresh()
         meter.frame_end(frame_started)
@@ -392,7 +393,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
             if bstate & curses.BUTTON1_PRESSED:
                 # Click in text area only.
-                if my < text_height and mx >= gutter_width + explorer_width:
+                if (my < text_height
+                        and gutter_width + explorer_width <= mx < gutter_width + explorer_width + text_width):
                     buf.move_to(buf_x, buf_y)
                     buf.selection_anchor = (buf_y, buf_x)
                     _mouse_dragging = True
@@ -409,7 +411,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 continue
             # Motion while dragging (REPORT_MOUSE_POSITION events).
             if _mouse_dragging:
-                if 0 <= my < text_height and mx >= gutter_width + explorer_width:
+                if (0 <= my < text_height
+                        and gutter_width + explorer_width <= mx < gutter_width + explorer_width + text_width):
                     buf.move_to(buf_x, buf_y, extend_selection=True)
             continue
 
@@ -653,8 +656,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             if git_panel_key(git_panel, key):
                 status = git_panel.last_result or ""
                 continue
-            # Tab/Ctrl-G/Esc from git panel → focus editor
-            if key in ("\t", "\x07", "\x1b"):
+            # Tab/Esc from git panel → focus editor (Ctrl-G handled below)
+            if key in ("\t", "\x1b"):
                 git_panel.active = False
                 status = ""
                 continue
@@ -741,10 +744,12 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 status = "Open cancelled"
         elif key == "\x06":  # Ctrl-F: find in buffer
             explorer.active = False
-            _find_replace_prompt(stdscr, buf, mode="find", git_panel_width=git_panel_width)
+            _find_replace_prompt(stdscr, buf, mode="find",
+                                 explorer_width=explorer_width)
         elif key == "\x12":  # Ctrl-R: replace all
             explorer.active = False
-            result = _find_replace_prompt(stdscr, buf, mode="replace", git_panel_width=git_panel_width)
+            result = _find_replace_prompt(stdscr, buf, mode="replace",
+                                          explorer_width=explorer_width)
             if result:
                 status = result
         elif key == "\x11":  # Ctrl-Q
@@ -879,7 +884,7 @@ def _find_all_matches(buf, query):
     return results
 
 
-def _find_replace_prompt(stdscr, buf, mode="find", git_panel_width=0):
+def _find_replace_prompt(stdscr, buf, mode="find", explorer_width=25):
     """Modal find / replace prompt.  Renders the full editor on each keystroke
     so the user sees highlighted matches in real-time."""
     global _search
@@ -893,9 +898,8 @@ def _find_replace_prompt(stdscr, buf, mode="find", git_panel_width=0):
 
     field = "query"  # which field has focus: "query" or "replace"
     height, width = stdscr.getmaxyx()
-    explorer_width = 25
     gutter_width = max(2, len(str(max(1, len(buf.lines))))) + 2
-    text_width = max(1, width - explorer_width - git_panel_width - gutter_width)
+    text_width = max(1, width - explorer_width - gutter_width)
     text_height = height - 1
 
     def _render():
@@ -905,16 +909,16 @@ def _find_replace_prompt(stdscr, buf, mode="find", git_panel_width=0):
         for row in range(text_height):
             line_idx = buf.scroll_y + row
             _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width,
-                         x_offset=explorer_width + git_panel_width)
+                         x_offset=explorer_width)
             if line_idx < len(buf.lines):
                 _draw_line(stdscr, row, buf.lines[line_idx], buf.scroll_x,
                            text_width, schema.detect_language(buf.filename or ""),
-                           x_offset=gutter_width + explorer_width + git_panel_width)
+                           x_offset=gutter_width + explorer_width)
                 _highlight_selection(stdscr, row, line_idx, buf.lines[line_idx], buf,
                                      scroll_x=buf.scroll_x, width=text_width,
-                                     x_offset=gutter_width + explorer_width + git_panel_width)
+                                     x_offset=gutter_width + explorer_width)
                 _highlight_find_match(stdscr, row, line_idx, text_width,
-                                      buf.scroll_x, gutter_width + explorer_width + git_panel_width)
+                                      buf.scroll_x, gutter_width + explorer_width)
         # Status prompt
         n = len(_search["matches"])
         pos = f" [{_search['idx'] + 1}/{n}]" if n else ""

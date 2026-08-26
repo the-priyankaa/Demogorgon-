@@ -316,24 +316,27 @@ def init_panel_colors() -> None:
     curses.init_pair(_PAIR_HEADER, curses.COLOR_CYAN, -1)
 
 
-def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
-    """Draw the source control panel on the left side."""
+def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int,
+                   x_offset: int = 0) -> None:
+    """Draw the source control panel at *x_offset* columns from the left."""
     if panel.mode == "diff":
         return  # diff is drawn as an overlay elsewhere
 
-    # Draw vertical separator on the right edge
+    # Draw vertical separator on the left edge
     for row in range(height):
         try:
-            stdscr.addstr(row, width - 1, "\u2502", curses.A_DIM)
+            stdscr.addstr(row, x_offset, "\u2502", curses.A_DIM)
         except curses.error:
             pass
 
+    col = x_offset + 1  # content starts after separator
+    inner_w = width - 1  # usable width after separator
     row = 0
 
     # -- Header ----------------------------------------------------- #
     header = " SOURCE CONTROL "
     try:
-        stdscr.addstr(row, 0, header.center(width - 1)[:width - 1],
+        stdscr.addstr(row, col, header.center(inner_w)[:inner_w],
                       curses.A_REVERSE | curses.A_BOLD)
     except curses.error:
         pass
@@ -344,7 +347,7 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
     if branch:
         branch_text = f" \u25b6 {branch} "
         try:
-            stdscr.addstr(row, 0, branch_text[:width - 1],
+            stdscr.addstr(row, col, branch_text[:inner_w],
                           curses.color_pair(_PAIR_HEADER) | curses.A_BOLD)
         except curses.error:
             pass
@@ -352,7 +355,7 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
 
     # -- Separator -------------------------------------------------- #
     try:
-        stdscr.addstr(row, 0, "\u2500" * (width - 1), curses.A_DIM)
+        stdscr.addstr(row, col, "\u2500" * inner_w, curses.A_DIM)
     except curses.error:
         pass
     row += 1
@@ -360,24 +363,24 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
     # -- Commit mode ------------------------------------------------ #
     if panel.mode == "commit":
         try:
-            stdscr.addstr(row, 0, " Commit message:", curses.A_BOLD)
+            stdscr.addstr(row, col, " Commit message:", curses.A_BOLD)
         except curses.error:
             pass
         row += 1
         try:
-            msg_display = panel.commit_message[:width - 3]
-            stdscr.addstr(row, 0, f" {msg_display}_", curses.A_UNDERLINE)
+            msg_display = panel.commit_message[:inner_w - 2]
+            stdscr.addstr(row, col, f" {msg_display}_", curses.A_UNDERLINE)
         except curses.error:
             pass
         row += 1
         try:
-            stdscr.addstr(row, 0, " Enter=commit  Esc=cancel", curses.A_DIM)
+            stdscr.addstr(row, col, " Enter=commit  Esc=cancel", curses.A_DIM)
         except curses.error:
             pass
         row += 1
         # Separator
         try:
-            stdscr.addstr(row, 0, "\u2500" * (width - 1), curses.A_DIM)
+            stdscr.addstr(row, col, "\u2500" * inner_w, curses.A_DIM)
         except curses.error:
             pass
         row += 1
@@ -385,7 +388,7 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
     # -- Branch select mode ----------------------------------------- #
     if panel.mode == "branch_select":
         try:
-            stdscr.addstr(row, 0, " Switch branch:", curses.A_BOLD)
+            stdscr.addstr(row, col, " Switch branch:", curses.A_BOLD)
         except curses.error:
             pass
         row += 1
@@ -396,12 +399,12 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
             marker = "\u25b6 " if i == panel.branch_idx else "  "
             try:
                 attr = curses.A_REVERSE if i == panel.branch_idx else 0
-                stdscr.addstr(row, 0, f"{marker}{b}"[:width - 1], attr)
+                stdscr.addstr(row, col, f"{marker}{b}"[:inner_w], attr)
             except curses.error:
                 pass
             row += 1
         try:
-            stdscr.addstr(row, 0, " Enter=switch  Esc=cancel", curses.A_DIM)
+            stdscr.addstr(row, col, " Enter=switch  Esc=cancel", curses.A_DIM)
         except curses.error:
             pass
         row += 1
@@ -409,13 +412,13 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
     # -- Issues mode ------------------------------------------------ #
     if panel.mode == "issues":
         try:
-            stdscr.addstr(row, 0, " Issues:", curses.A_BOLD)
+            stdscr.addstr(row, col, " Issues:", curses.A_BOLD)
         except curses.error:
             pass
         row += 1
         if not panel.issues:
             try:
-                stdscr.addstr(row, 0, " No open issues", curses.A_DIM)
+                stdscr.addstr(row, col, " No open issues", curses.A_DIM)
             except curses.error:
                 pass
             row += 1
@@ -428,12 +431,12 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
                 display = f"{marker}{label}"
                 try:
                     attr = curses.A_REVERSE if i == panel.issue_idx else 0
-                    stdscr.addstr(row, 0, display[:width - 1], attr)
+                    stdscr.addstr(row, col, display[:inner_w], attr)
                 except curses.error:
                     pass
                 row += 1
         try:
-            stdscr.addstr(row, 0, " o:close  r:reopen  Esc:back", curses.A_DIM)
+            stdscr.addstr(row, col, " o:close  r:reopen  Esc:back", curses.A_DIM)
         except curses.error:
             pass
         row += 1
@@ -441,13 +444,13 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
     # -- PRs mode --------------------------------------------------- #
     if panel.mode == "prs":
         try:
-            stdscr.addstr(row, 0, " Pull Requests:", curses.A_BOLD)
+            stdscr.addstr(row, col, " Pull Requests:", curses.A_BOLD)
         except curses.error:
             pass
         row += 1
         if not panel.prs:
             try:
-                stdscr.addstr(row, 0, " No open PRs", curses.A_DIM)
+                stdscr.addstr(row, col, " No open PRs", curses.A_DIM)
             except curses.error:
                 pass
             row += 1
@@ -460,12 +463,12 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
                 display = f"{marker}{label}"
                 try:
                     attr = curses.A_REVERSE if i == panel.pr_idx else 0
-                    stdscr.addstr(row, 0, display[:width - 1], attr)
+                    stdscr.addstr(row, col, display[:inner_w], attr)
                 except curses.error:
                     pass
                 row += 1
         try:
-            stdscr.addstr(row, 0, " c:checkout  m:merge  Esc:back", curses.A_DIM)
+            stdscr.addstr(row, col, " c:checkout  m:merge  Esc:back", curses.A_DIM)
         except curses.error:
             pass
         row += 1
@@ -482,7 +485,7 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
             return
         text = f" {label} ({count})" if count else f" {label}"
         try:
-            stdscr.addstr(row, 0, text[:width - 1],
+            stdscr.addstr(row, col, text[:inner_w],
                           curses.color_pair(_PAIR_HEADER) | curses.A_BOLD)
         except curses.error:
             pass
@@ -495,14 +498,14 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
         status_char = panel.STATUS_LABELS.get(f.status, f.status)
         prefix = " \u25cf " if is_selected else "   "
         # Truncate path to fit
-        avail = width - len(prefix) - 4  # status + space
+        avail = inner_w - len(prefix) - 4  # status + space
         display_path = f.path
         if len(display_path) > avail:
             display_path = "..." + display_path[-(avail - 3):]
         text = f"{prefix}{status_char} {display_path}"
         try:
             attr = curses.A_REVERSE if is_selected else 0
-            stdscr.addstr(row, 0, text[:width - 1], attr)
+            stdscr.addstr(row, col, text[:inner_w], attr)
         except curses.error:
             pass
         row += 1
@@ -521,7 +524,7 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
 
     if not panel.items:
         try:
-            stdscr.addstr(row, 0, " No changes", curses.A_DIM)
+            stdscr.addstr(row, col, " No changes", curses.A_DIM)
         except curses.error:
             pass
         row += 1
@@ -529,12 +532,12 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int) -> None:
     # -- Bottom separator + hints ----------------------------------- #
     bottom = height - 1
     try:
-        stdscr.addstr(bottom - 1, 0, "\u2500" * (width - 1), curses.A_DIM)
+        stdscr.addstr(bottom - 1, col, "\u2500" * inner_w, curses.A_DIM)
     except curses.error:
         pass
     hints = "c:commit s:stage u:unstage a:stage all d:diff p:push P:pull b:branch S:stash A:pop I:issues M:PRs"
     try:
-        stdscr.addstr(bottom, 0, hints[:width - 1], curses.A_DIM)
+        stdscr.addstr(bottom, col, hints[:inner_w], curses.A_DIM)
     except curses.error:
         pass
 
