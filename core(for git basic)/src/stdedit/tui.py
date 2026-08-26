@@ -64,6 +64,19 @@ _PASTE_START = "\x1b[200~"
 _PASTE_END = "\x1b[201~"
 
 
+def _apply_font_family() -> None:
+    """Send OSC 50 escape to switch terminal font to the active font family."""
+    font_name = settings.get_active_font_name()
+    if not font_name:
+        return
+    try:
+        import sys
+        sys.stdout.write(f"\033]50;{font_name}\007")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
 class EditorContext:
     """Small extension-facing editor context shared with the core TUI."""
     def __init__(self, buf: Buffer, stdscr=None):
@@ -188,6 +201,7 @@ def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None
     _init_colors()
     init_panel_colors()
     init_diff_colors()
+    _apply_font_family()
     _enable_bracketed_paste()
     curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
     curses.mouseinterval(0)
@@ -246,17 +260,27 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         text_height = height - 1  # reserve last row for status line
 
         # Calculate explorer width — proportional to terminal width
-        explorer_width = (min(25, max(18, width // 4))
-                          if explorer.visible else 0)
+        # Settings panel replaces explorer when open (same slot, same style).
+        if show_settings:
+            explorer_width = 0
+            settings_panel_width = min(35, max(22, width // 3))
+        else:
+            explorer_width = (min(25, max(18, width // 4))
+                              if explorer.visible else 0)
+            settings_panel_width = 0
 
         # Calculate git panel width — proportional to terminal width
         git_panel_width = (min(30, max(20, width // 5))
                            if git_panel and git_panel.visible else 0)
 
-        # Draw file explorer if visible
-        if explorer.visible:
+        # Draw file explorer if visible (not when settings panel is open)
+        if explorer.visible and not show_settings:
             _draw_explorer(stdscr, explorer, text_height, explorer_width,
                            icons_on)
+
+        # Draw settings panel (replaces explorer as left sidebar)
+        if show_settings:
+            _draw_settings_overlay(stdscr, settings_idx, settings_panel_width)
 
         # Handle diff overlay early (covers full screen)
         if git_panel and git_panel.visible and git_panel.mode == "diff":
@@ -359,8 +383,6 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         if show_help:
             _draw_help_overlay(stdscr, build_help_lines(width),
                                help_scroll)
-        if show_settings:
-            _draw_settings_overlay(stdscr, settings_idx)
         if quick_open.visible:
             _draw_quick_open_overlay(stdscr, quick_open)
 
@@ -486,16 +508,20 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         # Settings overlay (Ctrl-P).
         if key == "\x10" and not explorer.searching:
             show_settings = not show_settings
-            settings_idx = 0
+            settings_idx = next(i for i, (k, _) in enumerate(settings.LABELS) if k is not None)
             continue
         if show_settings:
-            n_items = len(settings.LABELS)
+            nav_keys = [i for i, (k, _) in enumerate(settings.LABELS) if k is not None]
+            n_items = len(nav_keys)
             if key == curses.KEY_UP:
-                settings_idx = (settings_idx - 1) % n_items
+                cur = nav_keys.index(settings_idx) if settings_idx in nav_keys else 0
+                settings_idx = nav_keys[(cur - 1) % n_items]
             elif key == curses.KEY_DOWN:
-                settings_idx = (settings_idx + 1) % n_items
+                cur = nav_keys.index(settings_idx) if settings_idx in nav_keys else 0
+                settings_idx = nav_keys[(cur + 1) % n_items]
             elif key in (" ", "\n", "\r"):
                 settings.toggle_radio(settings.LABELS[settings_idx][0])
+                _apply_font_family()
             elif key in ("\x1b", "\x10", "q"):
                 show_settings = False
             continue
@@ -1398,50 +1424,77 @@ def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
         "\u2514" + "\u2500" * (inner_w - 2) + "\u2518")
 
 
-def _draw_settings_overlay(stdscr, selected_idx: int) -> None:
-    """Paint a centered bordered settings box with toggleable options."""
+def _draw_settings_overlay(stdscr, selected_idx: int, panel_width: int) -> None:
+    """Draw settings as a left sidebar panel (same style as file tree)."""
     height, width = stdscr.getmaxyx()
     items = settings.LABELS
-    body_h = len(items) + 1  # +1 for hint line
-    content_w = max((len(f"[x] {label}") for _, label in items),
-                    default=0)
-    inner_w = max(40, min(content_w + 8, width * 70 // 100))
-    inner_w = min(inner_w, width - 2)
-    box_h = body_h + 2
-    top = max(0, (height - box_h) // 2)
-    left = max(0, (width - inner_w) // 2)
 
-    def put(row, col, text, attr=0):
+    # Build display rows
+    display_rows = []
+    for lbl_idx, (key, label) in enumerate(items):
+        if key is None:
+            if label:
+                display_rows.append(("header", label))
+                display_rows.append(("separator",))
+            else:
+                display_rows.append(("gap",))
+        else:
+            on = settings.get(key)
+            display_rows.append(("item", key, label, on, lbl_idx))
+
+    # Scroll viewport: center on selected item
+    draw_height = height - 1  # -1 for status bar
+    nav_indices = [i for i, r in enumerate(display_rows) if r[0] == "item"]
+    if nav_indices and selected_idx >= 0:
         try:
-            stdscr.addstr(row, col, text[:width - col], attr)
+            sel_pos = nav_indices.index(selected_idx)
+        except ValueError:
+            sel_pos = 0
+    else:
+        sel_pos = 0
+    start_idx = max(0, sel_pos - draw_height // 2)
+    end_idx = min(len(display_rows), start_idx + draw_height)
+
+    # Draw right border
+    for row in range(height):
+        try:
+            stdscr.addstr(row, panel_width - 1, "\u2502", curses.A_DIM)
         except curses.error:
             pass
 
-    title = " Settings "
-    max_title_w = inner_w - 2
-    if len(title) > max_title_w:
-        title = title[:max_title_w - 3] + "... "
-    fill = max(max_title_w - len(title), 0)
-    left_fill = fill // 2
-    right_fill = fill - left_fill
-    put(top, left, "\u250c" + "\u2500" * left_fill + title + "\u2500" *
-        right_fill + "\u2510", curses.A_REVERSE)
-    for i, (key, label) in enumerate(items):
-        on = settings.get(key)
-        if settings.is_radio_key(key):
-            marker = "(x)" if on else "( )"
+    # Draw items
+    for i, row_idx in enumerate(range(start_idx, end_idx)):
+        row = display_rows[row_idx]
+        if row[0] == "header":
+            display = row[1]
+            attr = curses.A_REVERSE
+        elif row[0] == "separator":
+            display = "\u2550" * (panel_width - 1)
+            attr = curses.A_DIM
+        elif row[0] == "gap":
+            display = ""
+            attr = 0
+        elif row[0] == "item":
+            _, key, label, on, nav_i = row
+            if settings.is_radio_key(key):
+                marker = "(x)" if on else "( )"
+            else:
+                marker = "[x]" if on else "[ ]"
+            display = f"  {marker} {label}"
+            attr = curses.A_REVERSE if nav_i == selected_idx else 0
         else:
-            marker = "[x]" if on else "[ ]"
-        line = f" {marker} {label}"
-        attr = curses.A_REVERSE if i == selected_idx else 0
-        put(top + 1 + i, left, "\u2502" + " " * inner_w + "\u2502")
-        put(top + 1 + i, left + 1, line[:inner_w - 2], attr)
-    # Hint line
-    hint = " \u2191\u2193 navigate  Space toggle  Esc close "
-    put(top + 1 + len(items), left, "\u2502" + " " * inner_w + "\u2502")
-    put(top + 1 + len(items), left + 1, hint[:inner_w - 2], curses.A_DIM)
-    put(top + box_h - 1, left,
-        "\u2514" + "\u2500" * (inner_w - 2) + "\u2518")
+            continue
+        try:
+            stdscr.addstr(i, 0, display.ljust(panel_width - 1)[:panel_width - 1], attr)
+        except curses.error:
+            pass
+
+    # Hint at bottom of panel
+    hint = " Ctrl-P close"
+    try:
+        stdscr.addstr(height - 2, 0, hint[:panel_width - 1], curses.A_DIM)
+    except curses.error:
+        pass
 
 
 # ---------------------------------------------------------------------- #

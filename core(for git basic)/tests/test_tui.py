@@ -554,5 +554,39 @@ class TestMouseMultiClick(unittest.TestCase):
         self.assertEqual(b.selected_text(), "hello world")
 
 
+class TestFontFamily(unittest.TestCase):
+    def test_settings_panel_includes_font_keys(self):
+        from stdedit import settings
+        keys = [k for k, _ in settings.LABELS if k is not None]
+        for fk in settings._font_keys:
+            self.assertIn(fk, keys)
+
+    def test_apply_font_family_sends_osc(self):
+        from stdedit import tui
+        import io
+        import sys
+        from unittest.mock import patch
+        from stdedit import settings
+        fake = io.StringIO()
+        with patch.object(sys, "stdout", fake):
+            tui._apply_font_family()
+        output = fake.getvalue()
+        self.assertIn("\033]50;", output)
+        self.assertIn("\007", output)
+
+    def test_apply_font_family_with_no_font(self):
+        from stdedit import tui
+        from stdedit import settings
+        for fk in settings._font_keys:
+            settings.set(fk, False)
+        import io
+        import sys
+        from unittest.mock import patch
+        fake = io.StringIO()
+        with patch.object(sys, "stdout", fake):
+            tui._apply_font_family()
+        self.assertEqual(fake.getvalue(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

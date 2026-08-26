@@ -12,24 +12,42 @@ import json
 import os
 from pathlib import Path
 
+from . import font_detect
+
+CONFIG_DIR = Path.home() / ".config" / "stdedit"
+CONFIG_FILE = CONFIG_DIR / "settings.json"
+
+# --- Auto-save keys (static) ---
+_AUTO_SAVE_KEYS = ["auto_save_idle", "auto_save_periodic", "auto_save_on_edit"]
+
+# --- Font family keys (dynamic from system) ---
+_font_keys, _font_labels = font_detect.font_keys_and_labels()
+
+# Build _DEFAULTS: auto-save + first font ON
 _DEFAULTS: dict[str, bool] = {
     "auto_save_idle": False,
     "auto_save_periodic": False,
     "auto_save_on_edit": False,
 }
+for i, fk in enumerate(_font_keys):
+    _DEFAULTS[fk] = (i == 0)
 
-CONFIG_DIR = Path.home() / ".config" / "stdedit"
-CONFIG_FILE = CONFIG_DIR / "settings.json"
-
-LABELS: list[tuple[str, str]] = [
+# Build LABELS
+LABELS: list[tuple[str | None, str]] = [
+    (None, "AUTO-SAVE"),
     ("auto_save_idle", "Auto-save: on idle (5s)"),
     ("auto_save_periodic", "Auto-save: every 30s"),
     ("auto_save_on_edit", "Auto-save: on every edit"),
+    (None, ""),
+    (None, "FONT FAMILY"),
 ]
+for fk, fl in zip(_font_keys, _font_labels):
+    LABELS.append((fk, fl))
 
-# Keys in the same group are mutually exclusive (radio-button behaviour).
+# Build RADIO_GROUPS
 RADIO_GROUPS: dict[str, list[str]] = {
-    "auto_save": ["auto_save_idle", "auto_save_periodic", "auto_save_on_edit"],
+    "auto_save": list(_AUTO_SAVE_KEYS),
+    "font_family": list(_font_keys),
 }
 
 # Build reverse lookup: key -> group name
@@ -37,6 +55,9 @@ _KEY_TO_GROUP: dict[str, str] = {}
 for _gname, _gkeys in RADIO_GROUPS.items():
     for _k in _gkeys:
         _KEY_TO_GROUP[_k] = _gname
+
+# Build reverse lookup: key -> display name
+_KEY_TO_FONT_NAME: dict[str, str] = dict(zip(_font_keys, _font_labels))
 
 _settings: dict[str, bool] = dict(_DEFAULTS)
 
@@ -94,14 +115,7 @@ def toggle(key: str) -> bool:
 
 
 def toggle_radio(key: str) -> bool:
-    """Toggle *key* as a radio button within its group.
-
-    If *key* is in a :data:`RADIO_GROUP`:
-      - If it is OFF, turn it ON and turn every other key in the group OFF.
-      - If it is already ON, turn it OFF (no selection in the group).
-
-    If *key* is not in any radio group, falls back to plain :func:`toggle`.
-    """
+    """Toggle *key* as a radio button within its group."""
     group_name = _KEY_TO_GROUP.get(key)
     if group_name is None:
         return toggle(key)
@@ -109,11 +123,9 @@ def toggle_radio(key: str) -> bool:
     group_keys = RADIO_GROUPS[group_name]
     was_on = _settings.get(key, False)
 
-    # Turn everything in the group OFF.
     for k in group_keys:
         _settings[k] = False
 
-    # If it was off, turn it on (if it was on, everything stays off).
     if not was_on:
         _settings[key] = True
 
@@ -128,6 +140,22 @@ def is_radio_key(key: str) -> bool:
 
 def any_auto_save() -> bool:
     return any(_settings[k] for k in RADIO_GROUPS.get("auto_save", []))
+
+
+def get_active_font_name() -> str | None:
+    """Return the display name of the currently selected font, or None."""
+    for fk in _font_keys:
+        if _settings.get(fk):
+            return _KEY_TO_FONT_NAME.get(fk)
+    return None
+
+
+def get_active_font_key() -> str | None:
+    """Return the settings key of the currently selected font, or None."""
+    for fk in _font_keys:
+        if _settings.get(fk):
+            return fk
+    return None
 
 
 # Load on import so the module is ready immediately.

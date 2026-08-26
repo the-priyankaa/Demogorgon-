@@ -156,7 +156,7 @@ class TestLabels(unittest.TestCase):
         settings._settings = dict(settings._DEFAULTS)
 
     def test_labels_match_defaults(self):
-        keys = {k for k, _ in settings.LABELS}
+        keys = {k for k, _ in settings.LABELS if k is not None}
         self.assertEqual(keys, set(settings._DEFAULTS.keys()))
 
 
@@ -218,6 +218,69 @@ class TestRadioGroup(unittest.TestCase):
         self.assertTrue(settings.any_auto_save())
         settings.toggle_radio("auto_save_periodic")  # OFF
         self.assertFalse(settings.any_auto_save())
+
+
+class TestFontFamily(unittest.TestCase):
+    def setUp(self):
+        for fk in settings._font_keys:
+            settings.set(fk, False)
+        settings.set(settings._font_keys[0], True)
+
+    def test_first_font_is_default(self):
+        first_key = settings._font_keys[0]
+        self.assertTrue(settings.get(first_key))
+
+    def test_other_fonts_are_off(self):
+        first_key = settings._font_keys[0]
+        for fk in settings._font_keys[1:]:
+            self.assertFalse(settings.get(fk), f"{fk} should be off by default")
+
+    def test_font_radio_group(self):
+        second_key = settings._font_keys[1]
+        settings.toggle_radio(second_key)
+        self.assertTrue(settings.get(second_key))
+        self.assertFalse(settings.get(settings._font_keys[0]))
+
+    def test_font_switch(self):
+        k1 = settings._font_keys[1]
+        k2 = settings._font_keys[2]
+        settings.toggle_radio(k1)
+        self.assertTrue(settings.get(k1))
+        settings.toggle_radio(k2)
+        self.assertTrue(settings.get(k2))
+        self.assertFalse(settings.get(k1))
+
+    def test_font_toggle_off(self):
+        k = settings._font_keys[1]
+        settings.toggle_radio(k)
+        self.assertTrue(settings.get(k))
+        settings.toggle_radio(k)  # OFF
+        self.assertFalse(settings.get(k))
+        self.assertFalse(settings.get(settings._font_keys[0]))
+
+    def test_font_all_exclusive(self):
+        for fk in settings._font_keys[1:]:
+            settings.toggle_radio(fk)
+            active = [k for k in settings._font_keys if settings.get(k)]
+            self.assertEqual(len(active), 1, f"Expected 1 active, got {active} for {fk}")
+            self.assertEqual(active[0], fk)
+
+    def test_get_active_font_name(self):
+        name = settings.get_active_font_name()
+        self.assertIsInstance(name, str)
+        self.assertTrue(len(name) > 0)
+
+    def test_get_active_font_key(self):
+        key = settings.get_active_font_key()
+        self.assertIn(key, settings._font_keys)
+
+    def test_font_key_to_label_matches(self):
+        for fk, fl in zip(settings._font_keys, settings._font_labels):
+            self.assertEqual(settings._KEY_TO_FONT_NAME[fk], fl)
+
+    def test_labels_contain_font_section(self):
+        section_headers = [label for key, label in settings.LABELS if key is None]
+        self.assertIn("FONT FAMILY", section_headers)
 
 
 if __name__ == "__main__":
