@@ -138,6 +138,8 @@ class TestHelpContent(unittest.TestCase):
         text = "\n".join(build_help_lines(200))
         for section in ("EDITING", "SELECTION & CLIPBOARD",
                         "HISTORY & FILES", "FILE TREE",
+                        "GIT STATUS", "SOURCE CONTROL",
+                        "DIFF VIEWER", "SETTINGS", "MOUSE",
                         "TERMINAL & PROMPTS", "HELP"):
             self.assertIn(section, text)
         self.assertIn("q / Esc / Enter", text)

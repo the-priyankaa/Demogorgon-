@@ -39,6 +39,9 @@ from .explorer import FileExplorer
 from . import filemanager
 from . import icons
 from . import settings
+from . import git
+from .git_panel import GitPanel, init_panel_colors, draw_git_panel, git_panel_key
+from .diff_viewer import DiffViewer, init_diff_colors, draw_diff_overlay, diff_viewer_key
 
 _COLOR_PAIRS = {
     "keyword": 1,
@@ -176,6 +179,8 @@ def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None
     curses.curs_set(1)
     stdscr.keypad(True)
     _init_colors()
+    init_panel_colors()
+    init_diff_colors()
     _enable_bracketed_paste()
     curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
     curses.mouseinterval(0)
@@ -188,6 +193,8 @@ def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None
     editor = EditorContext(buf, stdscr)
     explorer = FileExplorer(".")
     root_dir = resolve_tree_root(buf.filename, project_dir)
+    git_panel = GitPanel(root_dir if root_dir != "." else os.path.dirname(os.path.abspath(buf.filename)) if buf.filename else ".")
+    diff_viewer = DiffViewer()
     if root_dir != ".":
         explorer.set_root(root_dir)
     if buf.filename and os.path.isfile(buf.filename):
@@ -207,19 +214,23 @@ def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None
             status = (status + "  " if status else "") + f"{len(extension_errors)} extension error(s)"
         hint = "File tree active — Enter opens file/folder, Esc to focus editor, Ctrl-H help"
         status = (status + "   " if status else "") + hint
-        _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer, icons_on)
+        _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer, icons_on, root_dir, git_panel, diff_viewer)
     finally:
         extensions.shutdown()
         _disable_bracketed_paste()
 
 
-def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext, explorer: FileExplorer, icons_on: bool = False) -> None:
+def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext, explorer: FileExplorer, icons_on: bool = False, root_dir: str = ".", git_panel: GitPanel | None = None, diff_viewer: DiffViewer | None = None) -> None:
     show_help = False
     show_settings = False
     settings_idx = 0
     _last_edit_time = time.time()
     _last_save_time = time.time()
     _auto_save_flag = False
+    _git_branch = None
+    _git_counts: dict[str, int] = {"modified": 0, "added": 0, "deleted": 0, "untracked": 0}
+    _git_refresh_time = 0.0
+    _git_refresh_interval = 2.0  # seconds between git status refreshes
     while True:
         frame_started = meter.frame_start()
         stdscr.erase()
@@ -230,36 +241,89 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         explorer_width = (min(25, max(18, width // 4))
                           if explorer.visible else 0)
 
+        # Calculate git panel width — proportional to terminal width
+        git_panel_width = (min(30, max(20, width // 5))
+                           if git_panel and git_panel.visible else 0)
+
         # Draw file explorer if visible
         if explorer.visible:
             _draw_explorer(stdscr, explorer, text_height, explorer_width,
                            icons_on)
 
+        # Draw git panel if visible
+        if git_panel and git_panel.visible:
+            if git_panel.mode == "diff":
+                # Diff overlay mode — load diff if needed and draw full overlay
+                if diff_viewer and not diff_viewer.diff_text:
+                    diff_text = git_panel.get_selected_diff()
+                    f = git_panel.selected_file()
+                    title = f.path if f else "diff"
+                    diff_viewer.load(diff_text, title=title)
+                if diff_viewer:
+                    draw_diff_overlay(stdscr, diff_viewer, height, width)
+                    stdscr.move(height - 1, 0)
+                    status_line = format_status_bar(
+                        filename=buf.filename, modified=buf.modified,
+                        label=schema.language_label(language),
+                        cursor_y=buf.cursor_y, cursor_x=buf.cursor_x,
+                        total_lines=len(buf.lines), selected_line=buf.cursor_y,
+                        scroll_y=buf.scroll_y, viewport_height=text_height,
+                        finding=finding, git_branch=_git_branch,
+                        git_counts=_git_counts, width=width,
+                    )
+                    stdscr.addstr(height - 1, 0, status_line[:width - 1],
+                                  curses.A_REVERSE | curses.A_BOLD)
+                    try:
+                        stdscr.move(buf.cursor_y - buf.scroll_y, 0)
+                    except curses.error:
+                        pass
+                    if frame_started:
+                        meter.frame_end()
+                    continue
+            else:
+                draw_git_panel(stdscr, git_panel, text_height, git_panel_width)
+
         gutter_width = line_number_width(len(buf.lines)) + 2
-        text_width = max(1, width - explorer_width - gutter_width)
+        text_width = max(1, width - explorer_width - git_panel_width - gutter_width)
 
         buf.update_scroll(text_height, text_width)
 
         for row in range(text_height):
             line_idx = buf.scroll_y + row
-            _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width, x_offset=explorer_width)
+            _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width, x_offset=explorer_width + git_panel_width)
             if line_idx >= len(buf.lines):
                 continue
             line = buf.lines[line_idx]
             _draw_line(
                 stdscr, row, line, buf.scroll_x, text_width, language,
-                x_offset=gutter_width + explorer_width,
+                x_offset=gutter_width + explorer_width + git_panel_width,
             )
             _highlight_selection(
                 stdscr, row, line_idx, line, buf,
-                scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width + explorer_width,
+                scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width + explorer_width + git_panel_width,
             )
             _highlight_find_match(
                 stdscr, row, line_idx, text_width, buf.scroll_x,
-                gutter_width + explorer_width,
+                gutter_width + explorer_width + git_panel_width,
             )
 
         match = buf.matching_bracket()
+
+        # Refresh git info periodically (not every frame)
+        now_frame = time.time()
+        if now_frame - _git_refresh_time >= _git_refresh_interval:
+            _git_refresh_time = now_frame
+            project = root_dir if root_dir != "." else (os.path.dirname(buf.filename) if buf.filename else ".")
+            if git.is_git_repo(project):
+                _git_branch = git.get_branch(project)
+                _git_counts = git.get_status_counts(project)
+                # Also refresh git panel if visible
+                if git_panel and git_panel.visible:
+                    git_panel.refresh()
+            else:
+                _git_branch = None
+                _git_counts = {"modified": 0, "added": 0, "deleted": 0, "untracked": 0}
+
         status_line = format_status_bar(
             filename=buf.filename,
             modified=buf.modified,
@@ -275,6 +339,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             transient_status=status,
             icon=icons.icon_for_language(schema.language_label(language), icons_on),
             width=width,
+            git_branch=_git_branch,
+            git_counts=_git_counts,
         )
         try:
             stdscr.addstr(height - 1, 0, status_line, curses.A_REVERSE)
@@ -289,7 +355,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         stdscr.move(
             buf.cursor_y - buf.scroll_y,
-            explorer_width + gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
+            explorer_width + git_panel_width + gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
         )
         stdscr.refresh()
         meter.frame_end(frame_started)
@@ -562,6 +628,54 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         if explorer.visible and explorer.active and swallowed_by_tree(key):
             continue  # tree has focus: never leak typing into the editor
 
+        # Handle git panel keys when active
+        if git_panel and git_panel.visible and git_panel.active:
+            if git_panel.mode == "diff" and diff_viewer:
+                # Ctrl-G closes panel entirely from diff mode
+                if key == "\x07":
+                    git_panel.visible = False
+                    git_panel.active = False
+                    git_panel.end_diff()
+                    diff_viewer.diff_text = ""
+                    diff_viewer.lines = []
+                    status = ""
+                    continue
+                # Route other keys to diff viewer
+                if not diff_viewer_key(diff_viewer, key, text_height):
+                    # q/Esc → exit diff mode
+                    git_panel.end_diff()
+                    diff_viewer.diff_text = ""
+                    diff_viewer.lines = []
+                    status = ""
+                else:
+                    status = ""
+                continue
+            if git_panel_key(git_panel, key):
+                status = git_panel.last_result or ""
+                continue
+            # Tab/Ctrl-G/Esc from git panel → focus editor
+            if key in ("\t", "\x07", "\x1b"):
+                git_panel.active = False
+                status = ""
+                continue
+
+        if key == "\x07":  # Ctrl-G - toggle git panel
+            if not git_panel:
+                continue
+            if not git_panel.visible:
+                git_panel.visible = True
+                git_panel.active = True
+                git_panel.refresh()
+                status = "Source Control (c:commit s:stage u:unstage d:diff p:push)"
+            elif not git_panel.active:
+                git_panel.active = True
+                status = ""
+            else:
+                git_panel.visible = False
+                git_panel.active = False
+                status = "Source Control closed"
+            continue
+
         if key == "\x05":  # Ctrl-E - toggle explorer
             if not explorer.visible:
                 # Hidden → show and activate
@@ -627,10 +741,10 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 status = "Open cancelled"
         elif key == "\x06":  # Ctrl-F: find in buffer
             explorer.active = False
-            _find_replace_prompt(stdscr, buf, mode="find")
+            _find_replace_prompt(stdscr, buf, mode="find", git_panel_width=git_panel_width)
         elif key == "\x12":  # Ctrl-R: replace all
             explorer.active = False
-            result = _find_replace_prompt(stdscr, buf, mode="replace")
+            result = _find_replace_prompt(stdscr, buf, mode="replace", git_panel_width=git_panel_width)
             if result:
                 status = result
         elif key == "\x11":  # Ctrl-Q
@@ -765,7 +879,7 @@ def _find_all_matches(buf, query):
     return results
 
 
-def _find_replace_prompt(stdscr, buf, mode="find"):
+def _find_replace_prompt(stdscr, buf, mode="find", git_panel_width=0):
     """Modal find / replace prompt.  Renders the full editor on each keystroke
     so the user sees highlighted matches in real-time."""
     global _search
@@ -781,7 +895,7 @@ def _find_replace_prompt(stdscr, buf, mode="find"):
     height, width = stdscr.getmaxyx()
     explorer_width = 25
     gutter_width = max(2, len(str(max(1, len(buf.lines))))) + 2
-    text_width = max(1, width - explorer_width - gutter_width)
+    text_width = max(1, width - explorer_width - git_panel_width - gutter_width)
     text_height = height - 1
 
     def _render():
@@ -791,16 +905,16 @@ def _find_replace_prompt(stdscr, buf, mode="find"):
         for row in range(text_height):
             line_idx = buf.scroll_y + row
             _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width,
-                         x_offset=explorer_width)
+                         x_offset=explorer_width + git_panel_width)
             if line_idx < len(buf.lines):
                 _draw_line(stdscr, row, buf.lines[line_idx], buf.scroll_x,
                            text_width, schema.detect_language(buf.filename or ""),
-                           x_offset=gutter_width + explorer_width)
+                           x_offset=gutter_width + explorer_width + git_panel_width)
                 _highlight_selection(stdscr, row, line_idx, buf.lines[line_idx], buf,
                                      scroll_x=buf.scroll_x, width=text_width,
-                                     x_offset=gutter_width + explorer_width)
+                                     x_offset=gutter_width + explorer_width + git_panel_width)
                 _highlight_find_match(stdscr, row, line_idx, text_width,
-                                      buf.scroll_x, gutter_width + explorer_width)
+                                      buf.scroll_x, gutter_width + explorer_width + git_panel_width)
         # Status prompt
         n = len(_search["matches"])
         pos = f" [{_search['idx'] + 1}/{n}]" if n else ""
@@ -923,7 +1037,7 @@ HELP_SECTIONS = [
         "Home / End          jump to line start / end",
         "( { [               auto-close bracket pairs",
         ") } ]               skip closer / dedent on block close",
-        "\" '               auto-close quotes",
+        "\" '                auto-close quotes",
         "Ctrl-F              find text in the file",
         "Ctrl-R              replace all occurrences",
     ]),
@@ -957,6 +1071,45 @@ HELP_SECTIONS = [
         "O                   pick project root via system dialog",
         "R                   reveal root in system file manager",
         "Tab / Esc           focus the editor",
+    ]),
+    ("GIT STATUS", [
+        "status bar          shows branch name and change counts",
+        "                    +N added  ~N modified  -N deleted  !N untracked",
+        "automatic           refreshes every 2 seconds (no manual trigger)",
+    ]),
+    ("SOURCE CONTROL (Ctrl-G panel)", [
+        "Ctrl-G              open / close source control panel",
+        "j / k               move selection",
+        "c                   commit (type message, Enter to confirm)",
+        "s                   stage selected file",
+        "u                   unstage selected file",
+        "a                   stage all changes",
+        "d                   show diff for selected file",
+        "p                   push",
+        "P                   pull",
+        "b                   switch branch",
+        "S                   stash changes",
+        "A                   pop stash",
+        "I                   list issues (o:close r:reopen)",
+        "M                   list PRs (c:checkout m:merge)",
+        "Tab / Ctrl-G / Esc  focus the editor",
+    ]),
+    ("DIFF VIEWER", [
+        "d / Space           page down",
+        "u                   page up",
+        "j / k               scroll one line",
+        "g / G               jump to top / bottom",
+        "q / Esc             close diff view",
+    ]),
+    ("SETTINGS (Ctrl-P panel)", [
+        "Ctrl-P              open / close settings panel",
+        "Up / Down           navigate settings",
+        "Space               toggle selected setting",
+        "q / Esc / Ctrl-P    close settings panel",
+    ]),
+    ("MOUSE", [
+        "click               position cursor",
+        "drag                select text",
     ]),
     ("TERMINAL & PROMPTS", [
         "terminal paste      bracketed paste inserts multi-line text",
@@ -1264,6 +1417,8 @@ def format_status_bar(
     transient_status="",
     icon="",
     width=0,
+    git_branch=None,
+    git_counts=None,
 ) -> str:
     """Build the status bar text.
 
@@ -1283,6 +1438,12 @@ def format_status_bar(
         pct_text = ""
 
     left = f"{name}  [{icon + ' ' if icon else ''}{label}]{sel_flag}{large_flag}{match_flag}"
+    # Add git branch and status counts if available
+    if git_branch:
+        left += f"  {git_branch}"
+    git_status = git.format_status_counts(git_counts or {})
+    if git_status:
+        left += f"  {git_status}"
     right = f"Ln {cursor_y + 1}, Col {cursor_x + 1}{pct_text}"
 
     extras = []
