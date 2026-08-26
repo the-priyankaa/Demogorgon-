@@ -522,5 +522,38 @@ class TestSearchIntegration(unittest.TestCase):
         self.assertEqual(e.search_results, [])
 
 
+class TestMouseMultiClick(unittest.TestCase):
+    def test_scroll_wheel_up(self):
+        import curses
+        from stdedit.buffer import Buffer
+        from stdedit.tui import _mouse_dragging, _last_click_time, _click_count
+        b = Buffer()
+        b.lines = [f"line{i}" for i in range(50)]
+        b.move_to(0, 25)
+        b.update_scroll(20, 80)
+        b.move_cursor(dy=-3)
+        b.update_scroll(20, 80)
+        self.assertLess(b.cursor_y, 25)
+
+    def test_scroll_wheel_down(self):
+        from stdedit.buffer import Buffer
+        b = Buffer()
+        b.lines = [f"line{i}" for i in range(50)]
+        b.move_to(0, 0)
+        b.update_scroll(20, 80)
+        b.move_cursor(dy=3)
+        b.update_scroll(20, 80)
+        self.assertGreater(b.cursor_y, 0)
+
+    def test_select_word_and_line(self):
+        from stdedit.buffer import Buffer
+        b = Buffer()
+        b.lines = ["hello world"]
+        b.select_word_at(0, 2)
+        self.assertEqual(b.selected_text(), "hello")
+        b.select_line_at(0)
+        self.assertEqual(b.selected_text(), "hello world")
+
+
 if __name__ == "__main__":
     unittest.main()

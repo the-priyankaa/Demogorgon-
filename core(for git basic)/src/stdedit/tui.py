@@ -164,6 +164,9 @@ _search: dict = {
 }
 
 _mouse_dragging: bool = False
+_last_click_time: float = 0.0
+_click_count: int = 0
+_CLICK_THRESHOLD: float = 0.4
 
 
 def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
@@ -390,7 +393,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         # --- Mouse events (before all other key handling) ---
         if isinstance(key, tuple) and key[0] == "__mouse__":
-            global _mouse_dragging
+            global _mouse_dragging, _last_click_time, _click_count
             _, mx, my, bstate = key
             # Convert screen coords → buffer coords.
             buf_y = buf.scroll_y + my
@@ -398,19 +401,52 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             buf_y = max(0, min(buf_y, len(buf.lines) - 1))
             buf_x = max(0, min(buf_x, len(buf.lines[buf_y])))
 
+            # --- Scroll wheel ---
+            if bstate & curses.BUTTON4_PRESSED:
+                buf.move_cursor(dy=-3)
+                buf.update_scroll(text_height, text_width)
+                continue
+            if bstate & curses.BUTTON5_PRESSED:
+                buf.move_cursor(dy=3)
+                buf.update_scroll(text_height, text_width)
+                continue
+
             if bstate & curses.BUTTON1_PRESSED:
                 # Click in text area only.
                 if (my < text_height
                         and gutter_width + explorer_width <= mx < gutter_width + explorer_width + text_width):
-                    buf.move_to(buf_x, buf_y)
-                    buf.selection_anchor = (buf_y, buf_x)
+                    now = time.monotonic()
+                    # Detect multi-click (double / triple).
+                    if now - _last_click_time < _CLICK_THRESHOLD and _click_count >= 1:
+                        _click_count += 1
+                    else:
+                        _click_count = 1
+                    _last_click_time = now
+
+                    if _click_count >= 3:
+                        # Triple-click: select entire line.
+                        buf.select_line_at(buf_y)
+                        selecting = False
+                    elif _click_count == 2:
+                        # Double-click: select word.
+                        buf.select_word_at(buf_y, buf_x)
+                        selecting = False
+                    elif bstate & curses.BUTTON_SHIFT:
+                        # Shift+click: extend selection to click position.
+                        if buf.selection_anchor is None:
+                            buf.selection_anchor = (buf_y, buf_x)
+                        buf.move_to(buf_x, buf_y, extend_selection=True)
+                    else:
+                        # Normal click: position cursor, start anchor.
+                        buf.move_to(buf_x, buf_y)
+                        buf.selection_anchor = (buf_y, buf_x)
+                        selecting = False
                     _mouse_dragging = True
-                    selecting = False
                 elif my >= text_height:
                     # Click on status bar — ignore.
                     pass
                 else:
-                    # Click in gutter/explorer — ignore (let explorer handle if needed).
+                    # Click in gutter/explorer — ignore.
                     pass
                 continue
             if bstate & curses.BUTTON1_RELEASED:
@@ -1180,7 +1216,11 @@ HELP_SECTIONS = [
     ]),
     ("MOUSE", [
         "click               position cursor",
+        "double-click        select word",
+        "triple-click        select line",
         "drag                select text",
+        "Shift+click         extend selection",
+        "scroll wheel        scroll up / down",
     ]),
     ("TERMINAL & PROMPTS", [
         "terminal paste      bracketed paste inserts multi-line text",

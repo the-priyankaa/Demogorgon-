@@ -621,6 +621,52 @@ class Buffer:
             self.cursor_y = 0
             self.cursor_x = 0
 
+    def select_word_at(self, y: int, x: int) -> None:
+        """Select the word at position (y, x)."""
+        if y < 0 or y >= len(self.lines):
+            return
+        line = self.lines[y]
+        if not line or x < 0 or x >= len(line):
+            return
+        ch = line[x]
+        if ch.isalnum() or ch == '_':
+            is_word = True
+        else:
+            is_word = False
+        # Expand left
+        start = x
+        while start > 0:
+            prev = line[start - 1]
+            if is_word:
+                if not (prev.isalnum() or prev == '_'):
+                    break
+            else:
+                if prev.isalnum() or prev == '_':
+                    break
+            start -= 1
+        # Expand right
+        end = x + 1
+        while end < len(line):
+            nxt = line[end]
+            if is_word:
+                if not (nxt.isalnum() or nxt == '_'):
+                    break
+            else:
+                if nxt.isalnum() or nxt == '_':
+                    break
+            end += 1
+        self.selection_anchor = (y, start)
+        self.cursor_y = y
+        self.cursor_x = end
+
+    def select_line_at(self, y: int) -> None:
+        """Select the entire line at position y."""
+        if y < 0 or y >= len(self.lines):
+            return
+        self.selection_anchor = (y, 0)
+        self.cursor_y = y
+        self.cursor_x = len(self.lines[y])
+
     def _normalized_selection(self) -> Optional[Tuple[int, int, int, int]]:
         if not self.has_selection():
             return None

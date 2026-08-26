@@ -196,6 +196,67 @@ class TestIndentAndTabs(unittest.TestCase):
         self.assertEqual(b.lines, ["  a", "  b"])
 
 
+class TestSelectWordAt(unittest.TestCase):
+    def test_selects_word(self):
+        b = Buffer()
+        b.lines = ["hello world"]
+        b.select_word_at(0, 2)
+        self.assertEqual(b.selection_anchor, (0, 0))
+        self.assertEqual(b.cursor_x, 5)
+        self.assertEqual(b.selected_text(), "hello")
+
+    def test_selects_second_word(self):
+        b = Buffer()
+        b.lines = ["hello world"]
+        b.select_word_at(0, 7)
+        self.assertEqual(b.selection_anchor, (0, 6))
+        self.assertEqual(b.cursor_x, 11)
+        self.assertEqual(b.selected_text(), "world")
+
+    def test_selects_punctuation_group(self):
+        b = Buffer()
+        b.lines = ["a -- b"]
+        b.select_word_at(0, 3)
+        self.assertEqual(b.selection_anchor, (0, 1))
+        self.assertEqual(b.cursor_x, 5)
+        self.assertEqual(b.selected_text(), " -- ")
+
+    def test_empty_line_no_selection(self):
+        b = Buffer()
+        b.lines = ["hello"]
+        b.select_word_at(0, 10)
+        self.assertIsNone(b.selection_anchor)
+
+    def test_out_of_range_no_selection(self):
+        b = Buffer()
+        b.lines = ["hello"]
+        b.select_word_at(5, 0)
+        self.assertIsNone(b.selection_anchor)
+
+
+class TestSelectLineAt(unittest.TestCase):
+    def test_selects_entire_line(self):
+        b = Buffer()
+        b.lines = ["hello world"]
+        b.select_line_at(0)
+        self.assertEqual(b.selection_anchor, (0, 0))
+        self.assertEqual(b.cursor_x, 11)
+        self.assertEqual(b.selected_text(), "hello world")
+
+    def test_empty_line(self):
+        b = Buffer()
+        b.lines = [""]
+        b.select_line_at(0)
+        self.assertEqual(b.selection_anchor, (0, 0))
+        self.assertEqual(b.cursor_x, 0)
+
+    def test_out_of_range_no_selection(self):
+        b = Buffer()
+        b.lines = ["hello"]
+        b.select_line_at(5)
+        self.assertIsNone(b.selection_anchor)
+
+
 class TestLanguageIndent(unittest.TestCase):
     def test_configure_sets_tab_size_and_patterns(self):
         b = Buffer()
