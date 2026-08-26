@@ -156,10 +156,9 @@ class TestHelpToggle(unittest.TestCase):
             self.assertTrue(is_help_toggle("\x08", tree_active))
             self.assertTrue(is_help_toggle(curses.KEY_F1, tree_active))
 
-    def test_backspace_constant_toggles_only_while_tree_focused(self):
-        # On kbs=^H terminals keypad() delivers BOTH Backspace and
-        # Ctrl-H as KEY_BACKSPACE; the guide must not hijack editing.
-        self.assertTrue(is_help_toggle(curses.KEY_BACKSPACE, True))
+    def test_backspace_constant_never_toggles(self):
+        # Backspace should never open the help overlay.
+        self.assertFalse(is_help_toggle(curses.KEY_BACKSPACE, True))
         self.assertFalse(is_help_toggle(curses.KEY_BACKSPACE, False))
 
     def test_raw_ctrl_h_byte_is_the_literal_backspace_char(self):

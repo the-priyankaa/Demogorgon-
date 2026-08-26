@@ -1236,9 +1236,6 @@ HELP_SECTIONS = [
         "Ctrl-H or F1        open / close this guide",
         "Up / Down, PgUp/Dn  scroll this guide",
         "q / Esc / Enter     close this guide",
-        "",
-        "Note: some terminals merge Ctrl-H with Backspace. If Backspace",
-        "stops deleting while editing, use F1 here instead.",
     ]),
 ]
 
@@ -1260,15 +1257,9 @@ def build_help_lines(width):
 def is_help_toggle(key, tree_active):
     """Should `key` open/close the help overlay?
 
-    Raw Ctrl-H (\\x08) and F1 work anywhere.  On terminals whose
-    terminfo maps kbs=^H, keypad() translates both Backspace and
-    Ctrl-H into curses.KEY_BACKSPACE, so that constant opens the guide
-    only while the tree is focused -- in the editor it must keep
-    deleting characters.
+    Raw Ctrl-H (\\x08) and F1 work anywhere.
     """
-    if key == "\x08" or key == curses.KEY_F1:
-        return True
-    return bool(tree_active) and key == curses.KEY_BACKSPACE
+    return key == "\x08" or key == curses.KEY_F1
 
 
 def swallowed_by_tree(key) -> bool:
