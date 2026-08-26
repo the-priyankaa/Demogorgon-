@@ -18,13 +18,14 @@ CONFIG_DIR = Path.home() / ".config" / "stdedit"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
 
 # --- Auto-save keys (static) ---
-_AUTO_SAVE_KEYS = ["auto_save_idle", "auto_save_periodic", "auto_save_on_edit"]
+_AUTO_SAVE_KEYS = ["auto_save_off", "auto_save_idle", "auto_save_periodic", "auto_save_on_edit"]
 
 # --- Font family keys (dynamic from system) ---
 _font_keys, _font_labels = font_detect.font_keys_and_labels()
 
 # Build _DEFAULTS: auto-save + first font ON
 _DEFAULTS: dict[str, bool] = {
+    "auto_save_off": True,
     "auto_save_idle": False,
     "auto_save_periodic": False,
     "auto_save_on_edit": False,
@@ -35,6 +36,7 @@ for i, fk in enumerate(_font_keys):
 # Build LABELS
 LABELS: list[tuple[str | None, str]] = [
     (None, "AUTO-SAVE"),
+    ("auto_save_off", "Auto-save: off"),
     ("auto_save_idle", "Auto-save: on idle (5s)"),
     ("auto_save_periodic", "Auto-save: every 30s"),
     ("auto_save_on_edit", "Auto-save: on every edit"),
@@ -139,7 +141,7 @@ def is_radio_key(key: str) -> bool:
 
 
 def any_auto_save() -> bool:
-    return any(_settings[k] for k in RADIO_GROUPS.get("auto_save", []))
+    return any(_settings[k] for k in _AUTO_SAVE_KEYS if k != "auto_save_off")
 
 
 def get_active_font_name() -> str | None:

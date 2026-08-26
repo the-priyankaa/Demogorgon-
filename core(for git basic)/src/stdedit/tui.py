@@ -273,6 +273,9 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         git_panel_width = (min(30, max(20, width // 5))
                            if git_panel and git_panel.visible else 0)
 
+        # Combined left offset: explorer + settings panel
+        left_offset = explorer_width + settings_panel_width
+
         # Draw file explorer if visible (not when settings panel is open)
         if explorer.visible and not show_settings:
             _draw_explorer(stdscr, explorer, text_height, explorer_width,
@@ -311,32 +314,32 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 continue
 
         gutter_width = line_number_width(len(buf.lines)) + 2
-        text_width = max(1, width - explorer_width - gutter_width - git_panel_width)
+        text_width = max(1, width - left_offset - gutter_width - git_panel_width)
 
         buf.update_scroll(text_height, text_width)
 
         for row in range(text_height):
             line_idx = buf.scroll_y + row
-            _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width, x_offset=explorer_width)
+            _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width, x_offset=left_offset)
             if line_idx >= len(buf.lines):
                 continue
             line = buf.lines[line_idx]
             _draw_line(
                 stdscr, row, line, buf.scroll_x, text_width, language,
-                x_offset=gutter_width + explorer_width,
+                x_offset=gutter_width + left_offset,
             )
             _highlight_selection(
                 stdscr, row, line_idx, line, buf,
-                scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width + explorer_width,
+                scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width + left_offset,
             )
             _highlight_find_match(
                 stdscr, row, line_idx, text_width, buf.scroll_x,
-                gutter_width + explorer_width,
+                gutter_width + left_offset,
             )
 
         # Draw git panel on the RIGHT side (after editor content)
         if git_panel and git_panel.visible:
-            git_panel_x = explorer_width + gutter_width + text_width
+            git_panel_x = left_offset + gutter_width + text_width
             draw_git_panel(stdscr, git_panel, text_height, git_panel_width,
                            x_offset=git_panel_x)
 
@@ -388,7 +391,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         stdscr.move(
             buf.cursor_y - buf.scroll_y,
-            explorer_width + gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
+            left_offset + gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
         )
         stdscr.refresh()
         meter.frame_end(frame_started)
@@ -419,7 +422,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             _, mx, my, bstate = key
             # Convert screen coords → buffer coords.
             buf_y = buf.scroll_y + my
-            buf_x = buf.scroll_x + (mx - gutter_width - explorer_width)
+            buf_x = buf.scroll_x + (mx - gutter_width - left_offset)
             buf_y = max(0, min(buf_y, len(buf.lines) - 1))
             buf_x = max(0, min(buf_x, len(buf.lines[buf_y])))
 
@@ -436,7 +439,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             if bstate & curses.BUTTON1_PRESSED:
                 # Click in text area only.
                 if (my < text_height
-                        and gutter_width + explorer_width <= mx < gutter_width + explorer_width + text_width):
+                        and gutter_width + left_offset <= mx < gutter_width + left_offset + text_width):
                     now = time.monotonic()
                     # Detect multi-click (double / triple).
                     if now - _last_click_time < _CLICK_THRESHOLD and _click_count >= 1:
@@ -477,7 +480,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             # Motion while dragging (REPORT_MOUSE_POSITION events).
             if _mouse_dragging:
                 if (0 <= my < text_height
-                        and gutter_width + explorer_width <= mx < gutter_width + explorer_width + text_width):
+                        and gutter_width + left_offset <= mx < gutter_width + left_offset + text_width):
                     buf.move_to(buf_x, buf_y, extend_selection=True)
             continue
 

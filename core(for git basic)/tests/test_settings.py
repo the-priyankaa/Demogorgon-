@@ -21,6 +21,7 @@ class TestDefaults(unittest.TestCase):
     def test_all_auto_save_off_by_default(self):
         with mock.patch.object(settings, "CONFIG_FILE", Path("/nonexistent")):
             settings._load()
+            self.assertTrue(settings.get("auto_save_off"))
             self.assertFalse(settings.get("auto_save_idle"))
             self.assertFalse(settings.get("auto_save_periodic"))
             self.assertFalse(settings.get("auto_save_on_edit"))
@@ -58,19 +59,21 @@ class TestRoundTrip(unittest.TestCase):
 
     def test_toggle_persists_and_reloads(self):
         settings._load()
-        self.assertFalse(settings.get("auto_save_idle"))
-        settings.toggle("auto_save_idle")
+        self.assertTrue(settings.get("auto_save_off"))
+        settings.toggle_radio("auto_save_idle")
         self.assertTrue(settings.get("auto_save_idle"))
         # Re-load from disk
         settings._load()
         self.assertTrue(settings.get("auto_save_idle"))
+        self.assertFalse(settings.get("auto_save_off"))
 
     def test_set_persists(self):
         settings._load()
-        settings.set("auto_save_periodic", True)
+        settings.toggle_radio("auto_save_periodic")
         self.assertTrue(self._file.exists())
         settings._load()
         self.assertTrue(settings.get("auto_save_periodic"))
+        self.assertFalse(settings.get("auto_save_off"))
 
     def test_toggle_back_to_false(self):
         settings._load()
@@ -87,7 +90,7 @@ class TestRoundTrip(unittest.TestCase):
         self.assertIn("auto_save_idle", data)
 
     def test_unrelated_keys_ignored_on_load(self):
-        self._file.write_text('{"auto_save_idle": true, "junk": 42}\n')
+        self._file.write_text('{"auto_save_off": false, "auto_save_idle": true, "junk": 42}\n')
         settings._load()
         self.assertTrue(settings.get("auto_save_idle"))
         # junk should not cause an error
@@ -169,6 +172,7 @@ class TestRadioGroup(unittest.TestCase):
     def test_toggle_radio_turns_on_and_clears_others(self):
         settings.toggle_radio("auto_save_idle")
         self.assertTrue(settings.get("auto_save_idle"))
+        self.assertFalse(settings.get("auto_save_off"))
         self.assertFalse(settings.get("auto_save_periodic"))
         self.assertFalse(settings.get("auto_save_on_edit"))
 
@@ -176,6 +180,7 @@ class TestRadioGroup(unittest.TestCase):
         settings.toggle_radio("auto_save_idle")   # ON
         settings.toggle_radio("auto_save_idle")   # OFF
         self.assertFalse(settings.get("auto_save_idle"))
+        self.assertFalse(settings.get("auto_save_off"))
         self.assertFalse(settings.get("auto_save_periodic"))
         self.assertFalse(settings.get("auto_save_on_edit"))
 
@@ -183,6 +188,7 @@ class TestRadioGroup(unittest.TestCase):
         settings.toggle_radio("auto_save_idle")    # idle ON
         settings.toggle_radio("auto_save_periodic")  # periodic ON, idle OFF
         self.assertFalse(settings.get("auto_save_idle"))
+        self.assertFalse(settings.get("auto_save_off"))
         self.assertTrue(settings.get("auto_save_periodic"))
         self.assertFalse(settings.get("auto_save_on_edit"))
 
@@ -191,6 +197,7 @@ class TestRadioGroup(unittest.TestCase):
         self.assertTrue(settings.get("no_such_key"))
 
     def test_is_radio_key(self):
+        self.assertTrue(settings.is_radio_key("auto_save_off"))
         self.assertTrue(settings.is_radio_key("auto_save_idle"))
         self.assertTrue(settings.is_radio_key("auto_save_periodic"))
         self.assertTrue(settings.is_radio_key("auto_save_on_edit"))
@@ -198,11 +205,13 @@ class TestRadioGroup(unittest.TestCase):
 
     def test_enforce_on_load_fixes_legacy_multi(self):
         """Legacy config with multiple ON → load keeps only the first."""
+        settings._settings["auto_save_off"] = True
         settings._settings["auto_save_idle"] = True
         settings._settings["auto_save_periodic"] = True
         settings._settings["auto_save_on_edit"] = True
         settings._enforce_radio_groups()
-        self.assertTrue(settings.get("auto_save_idle"))
+        self.assertTrue(settings.get("auto_save_off"))
+        self.assertFalse(settings.get("auto_save_idle"))
         self.assertFalse(settings.get("auto_save_periodic"))
         self.assertFalse(settings.get("auto_save_on_edit"))
 
@@ -218,6 +227,12 @@ class TestRadioGroup(unittest.TestCase):
         self.assertTrue(settings.any_auto_save())
         settings.toggle_radio("auto_save_periodic")  # OFF
         self.assertFalse(settings.any_auto_save())
+
+    def test_any_auto_save_excludes_off(self):
+        settings.set("auto_save_off", True)
+        self.assertFalse(settings.any_auto_save())
+        settings.set("auto_save_idle", True)
+        self.assertTrue(settings.any_auto_save())
 
 
 class TestFontFamily(unittest.TestCase):
