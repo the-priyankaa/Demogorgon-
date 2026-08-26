@@ -7,6 +7,7 @@ import unittest
 from stdedit.git import (
     is_git_repo,
     get_branch,
+    get_ahead_behind,
     get_status_counts,
     format_status_counts,
 )
@@ -201,6 +202,44 @@ class TestFormatStatusCounts(unittest.TestCase):
     def test_empty_string_for_clean(self):
         result = format_status_counts({"modified": 0, "added": 0, "deleted": 0, "untracked": 0})
         self.assertEqual(result, "")
+
+
+class TestGetAheadBehind(unittest.TestCase):
+    def test_no_upstream(self):
+        d = _init_repo()
+        try:
+            result = get_ahead_behind(d)
+            self.assertEqual(result, (0, 0))
+        finally:
+            shutil.rmtree(d)
+
+    def test_not_a_repo(self):
+        result = get_ahead_behind("/tmp")
+        self.assertEqual(result, (0, 0))
+
+    def test_with_upstream(self):
+        d = _init_repo()
+        try:
+            # Create a bare remote and push
+            bare = tempfile.mkdtemp()
+            subprocess.run(["git", "init", "--bare", bare], capture_output=True, check=True)
+            subprocess.run(["git", "-C", d, "remote", "add", "origin", bare],
+                           capture_output=True, check=True)
+            subprocess.run(["git", "-C", d, "push", "-u", "origin", "master"],
+                           capture_output=True, check=True)
+            # Make a new commit locally
+            path = os.path.join(d, "new.txt")
+            with open(path, "w") as f:
+                f.write("new\n")
+            subprocess.run(["git", "-C", d, "add", "new.txt"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", d, "commit", "-m", "second"],
+                           capture_output=True, check=True)
+            ahead, behind = get_ahead_behind(d)
+            self.assertEqual(ahead, 1)
+            self.assertEqual(behind, 0)
+            shutil.rmtree(bare)
+        finally:
+            shutil.rmtree(d)
 
 
 if __name__ == "__main__":

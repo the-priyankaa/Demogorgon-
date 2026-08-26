@@ -669,7 +669,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 git_panel.visible = True
                 git_panel.active = True
                 git_panel.refresh()
-                status = "Source Control (c:commit s:stage u:unstage d:diff p:push)"
+                status = "Source Control (c:commit s:stage u:unstage d:diff)"
             elif not git_panel.active:
                 git_panel.active = True
                 status = ""
@@ -1084,16 +1084,18 @@ HELP_SECTIONS = [
     ("SOURCE CONTROL (Ctrl-G panel)", [
         "Ctrl-G              open / close source control panel",
         "j / k               move selection",
-        "c                   commit (type message, Enter to confirm)",
+        "c                   focus commit message box",
+        "Enter               commit (when message box focused)",
+        "Esc                 cancel commit / defocus panel",
         "s                   stage selected file",
         "u                   unstage selected file",
-        "a                   stage all changes",
+        "S                   stage all changes",
+        "U                   unstage all changes",
         "d                   show diff for selected file",
         "p                   push",
         "P                   pull",
+        "R                   refresh status",
         "b                   switch branch",
-        "S                   stash changes",
-        "A                   pop stash",
         "I                   list issues (o:close r:reopen)",
         "M                   list PRs (c:checkout m:merge)",
         "Tab / Ctrl-G / Esc  focus the editor",

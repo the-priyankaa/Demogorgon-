@@ -45,6 +45,21 @@ def get_branch(path: str) -> Optional[str]:
     return branch if branch and branch != "HEAD" else None
 
 
+def get_ahead_behind(path: str) -> tuple[int, int]:
+    """Return ``(ahead, behind)`` counts vs upstream, or ``(0, 0)``."""
+    r = _run(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+             cwd=path)
+    if r is None or r.returncode != 0:
+        return (0, 0)
+    parts = r.stdout.strip().split()
+    if len(parts) >= 2:
+        try:
+            return (int(parts[0]), int(parts[1]))
+        except ValueError:
+            pass
+    return (0, 0)
+
+
 def get_status_counts(path: str) -> dict[str, int]:
     """Return counts of modified, added, deleted, and untracked files.
 

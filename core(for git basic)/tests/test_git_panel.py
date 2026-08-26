@@ -199,11 +199,11 @@ class TestGitPanelCommit(unittest.TestCase):
             subprocess.run(["git", "-C", d, "add", "hello.txt"], capture_output=True)
             p = GitPanel(d)
             p.refresh()
-            self.assertEqual(p.mode, "normal")
+            self.assertFalse(p.committing)
 
             # Enter commit mode
             p.begin_commit()
-            self.assertEqual(p.mode, "commit")
+            self.assertTrue(p.committing)
             self.assertEqual(p.commit_message, "")
 
             # Type message
@@ -215,7 +215,7 @@ class TestGitPanelCommit(unittest.TestCase):
             # Commit
             result = p.do_commit()
             self.assertEqual(result, "Committed")
-            self.assertEqual(p.mode, "normal")
+            self.assertFalse(p.committing)
             p.refresh()
             self.assertEqual(p.items, [])
         finally:
@@ -232,7 +232,7 @@ class TestGitPanelCommit(unittest.TestCase):
             p.begin_commit()
             result = p.do_commit()
             self.assertEqual(result, "Empty message")
-            self.assertEqual(p.mode, "normal")
+            self.assertFalse(p.committing)
         finally:
             shutil.rmtree(d)
 
@@ -241,8 +241,28 @@ class TestGitPanelCommit(unittest.TestCase):
         p.begin_commit()
         p.commit_char("x")
         p.cancel_commit()
-        self.assertEqual(p.mode, "normal")
+        self.assertFalse(p.committing)
         self.assertEqual(p.commit_message, "")
+
+    def test_ahead_behind_populated(self):
+        d = _init_repo()
+        try:
+            p = GitPanel(d)
+            p.refresh()
+            self.assertEqual(p.ahead, 0)
+            self.assertEqual(p.behind, 0)
+        finally:
+            shutil.rmtree(d)
+
+    def test_set_root(self):
+        d = _init_repo()
+        try:
+            p = GitPanel(d)
+            p.set_root("/tmp")
+            self.assertEqual(p.root_dir, "/tmp")
+            self.assertFalse(p.committing)
+        finally:
+            shutil.rmtree(d)
 
 
 class TestGitPanelBranchSelect(unittest.TestCase):
@@ -322,9 +342,9 @@ class TestGitPanelKey(unittest.TestCase):
         p = GitPanel("/tmp")
         p.active = True
         self.assertTrue(git_panel_key(p, "c"))
-        self.assertEqual(p.mode, "commit")
+        self.assertTrue(p.committing)
 
-    def test_stage_key(self):
+    def test_stage_all_key(self):
         d = _init_repo()
         try:
             with open(os.path.join(d, "hello.txt"), "w") as f:
@@ -333,11 +353,11 @@ class TestGitPanelKey(unittest.TestCase):
             p.visible = True
             p.active = True
             p.refresh()
-            self.assertTrue(git_panel_key(p, "s"))
+            self.assertTrue(git_panel_key(p, "S"))
         finally:
             shutil.rmtree(d)
 
-    def test_unstage_key(self):
+    def test_unstage_all_key(self):
         d = _init_repo()
         try:
             with open(os.path.join(d, "hello.txt"), "w") as f:
@@ -347,9 +367,15 @@ class TestGitPanelKey(unittest.TestCase):
             p.visible = True
             p.active = True
             p.refresh()
-            self.assertTrue(git_panel_key(p, "u"))
+            self.assertTrue(git_panel_key(p, "U"))
         finally:
             shutil.rmtree(d)
+
+    def test_refresh_key(self):
+        p = GitPanel("/tmp")
+        p.active = True
+        self.assertTrue(git_panel_key(p, "R"))
+        self.assertEqual(p.last_result, "Refreshed")
 
     def test_unknown_key_not_consumed(self):
         p = GitPanel("/tmp")
@@ -364,7 +390,7 @@ class TestGitPanelKey(unittest.TestCase):
         self.assertTrue(git_panel_key(p, "\x7f"))  # backspace
         self.assertEqual(p.commit_message, "h")
         self.assertTrue(git_panel_key(p, "\x1b"))  # escape
-        self.assertEqual(p.mode, "normal")
+        self.assertFalse(p.committing)
 
     def test_branch_select_mode_keys(self):
         d = _init_repo()

@@ -36,9 +36,14 @@ class GitPanel:
         self.items: list[git.GitFile] = []
         self.selected_idx: int = 0
         self.scroll_offset: int = 0
-        # Mode: "normal" | "commit" | "branch_select" | "diff" | "issues" | "prs"
+        # Mode: "normal" | "branch_select" | "diff" | "issues" | "prs"
         self.mode: str = "normal"
+        # Commit message (always available — VS Code style)
         self.commit_message: str = ""
+        self.committing: bool = False
+        # Ahead / behind upstream
+        self.ahead: int = 0
+        self.behind: int = 0
         self.branches: list[str] = []
         self.branch_idx: int = 0
         self.last_result: str = ""
@@ -54,13 +59,24 @@ class GitPanel:
         """Re-read ``git status`` and rebuild the file list."""
         if not git.is_git_repo(self.root_dir):
             self.items = []
+            self.ahead = 0
+            self.behind = 0
             return
         self.items = git.get_status_files(self.root_dir)
+        self.ahead, self.behind = git.get_ahead_behind(self.root_dir)
         # Clamp selection
         if self.items and self.selected_idx >= len(self.items):
             self.selected_idx = len(self.items) - 1
         elif not self.items:
             self.selected_idx = 0
+
+    def set_root(self, root_dir: str) -> None:
+        """Change the project root at runtime."""
+        self.root_dir = os.path.abspath(root_dir)
+        self.mode = "normal"
+        self.committing = False
+        self.commit_message = ""
+        self.refresh()
 
     # -- navigation ------------------------------------------------- #
 
@@ -101,11 +117,11 @@ class GitPanel:
 
     def begin_commit(self) -> None:
         """Enter commit mode (type message, Enter to commit)."""
-        self.mode = "commit"
+        self.committing = True
         self.commit_message = ""
 
     def cancel_commit(self) -> None:
-        self.mode = "normal"
+        self.committing = False
         self.commit_message = ""
 
     def commit_char(self, ch: str) -> None:
@@ -119,10 +135,10 @@ class GitPanel:
         msg = self.commit_message.strip()
         if not msg:
             self.last_result = "Empty message"
-            self.mode = "normal"
+            self.committing = False
             return self.last_result
         ok = git.commit(self.root_dir, msg)
-        self.mode = "normal"
+        self.committing = False
         self.commit_message = ""
         self.refresh()
         self.last_result = "Committed" if ok else "Commit failed"
@@ -342,10 +358,17 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int,
         pass
     row += 1
 
-    # -- Branch info ------------------------------------------------ #
+    # -- Branch info + ahead/behind --------------------------------- #
     branch = git.get_branch(panel.root_dir)
     if branch:
-        branch_text = f" \u25b6 {branch} "
+        branch_text = f" \u25b6 {branch}"
+        if panel.ahead or panel.behind:
+            parts = []
+            if panel.ahead:
+                parts.append(f"{panel.ahead} ahead")
+            if panel.behind:
+                parts.append(f"{panel.behind} behind")
+            branch_text += f"  ({', '.join(parts)})"
         try:
             stdscr.addstr(row, col, branch_text[:inner_w],
                           curses.color_pair(_PAIR_HEADER) | curses.A_BOLD)
@@ -360,16 +383,17 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int,
         pass
     row += 1
 
-    # -- Commit mode ------------------------------------------------ #
-    if panel.mode == "commit":
+    # -- Commit message box (always visible) ------------------------ #
+    if panel.committing:
         try:
-            stdscr.addstr(row, col, " Commit message:", curses.A_BOLD)
+            stdscr.addstr(row, col, " Message:", curses.A_BOLD)
         except curses.error:
             pass
         row += 1
         try:
             msg_display = panel.commit_message[:inner_w - 2]
-            stdscr.addstr(row, col, f" {msg_display}_", curses.A_UNDERLINE)
+            placeholder = msg_display + "_" if len(msg_display) < len(panel.commit_message) else msg_display + "_"
+            stdscr.addstr(row, col, f" {placeholder}"[:inner_w], curses.A_UNDERLINE)
         except curses.error:
             pass
         row += 1
@@ -378,12 +402,21 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int,
         except curses.error:
             pass
         row += 1
-        # Separator
+    else:
         try:
-            stdscr.addstr(row, col, "\u2500" * inner_w, curses.A_DIM)
+            msg_text = panel.commit_message if panel.commit_message else "Message..."
+            display = f" {msg_text}"
+            stdscr.addstr(row, col, display[:inner_w], curses.A_DIM)
         except curses.error:
             pass
         row += 1
+
+    # -- Separator -------------------------------------------------- #
+    try:
+        stdscr.addstr(row, col, "\u2500" * inner_w, curses.A_DIM)
+    except curses.error:
+        pass
+    row += 1
 
     # -- Branch select mode ----------------------------------------- #
     if panel.mode == "branch_select":
@@ -473,19 +506,43 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int,
             pass
         row += 1
 
-    # -- File list -------------------------------------------------- #
-    # Compute staging sections
+    # -- File list (Changes on top, Staged below — VS Code order) --- #
     staged = [f for f in panel.items if f.staged]
     unstaged = [f for f in panel.items if not f.staged]
 
-    # Section headers
-    def _draw_section(label: str, count: int) -> None:
+    def _status_color(status: str) -> int:
+        """Return curses color pair number for a status char."""
+        _colors = {
+            "M": curses.COLOR_YELLOW, "A": curses.COLOR_GREEN,
+            "D": curses.COLOR_RED, "?": curses.COLOR_WHITE,
+            "R": curses.COLOR_CYAN, "C": curses.COLOR_CYAN,
+            "U": curses.COLOR_RED,
+        }
+        c = _colors.get(status, curses.COLOR_WHITE)
+        return c
+
+    def _draw_section(label: str, count: int, can_stage_all: bool = False,
+                      can_unstage_all: bool = False) -> None:
         nonlocal row
         if row >= height - 1:
             return
-        text = f" {label} ({count})" if count else f" {label}"
+        count_str = f" ({count})" if count else ""
+        header_text = f" {label}{count_str}"
+        # Right-align stage/unstage icons
+        icons = ""
+        if can_stage_all and count == 0:
+            pass
+        elif can_unstage_all and count == 0:
+            pass
+        else:
+            if can_stage_all:
+                icons += " [+]"
+            if can_unstage_all:
+                icons += " [-]"
+        padding = inner_w - len(header_text) - len(icons)
+        full = header_text + " " * max(0, padding) + icons
         try:
-            stdscr.addstr(row, col, text[:inner_w],
+            stdscr.addstr(row, col, full[:inner_w],
                           curses.color_pair(_PAIR_HEADER) | curses.A_BOLD)
         except curses.error:
             pass
@@ -510,13 +567,13 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int,
             pass
         row += 1
 
-    _draw_section("Staged", len(staged))
+    _draw_section("Staged Changes", len(staged), can_unstage_all=bool(staged))
     for f in staged:
         if row >= height - 1:
             break
         _draw_file(f, panel.items.index(f) == panel.selected_idx)
 
-    _draw_section("Changes", len(unstaged))
+    _draw_section("Changes", len(unstaged), can_stage_all=bool(unstaged))
     for f in unstaged:
         if row >= height - 1:
             break
@@ -529,13 +586,31 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int,
             pass
         row += 1
 
-    # -- Bottom separator + hints ----------------------------------- #
+    # -- Bottom separator + action bar + hints ---------------------- #
     bottom = height - 1
     try:
-        stdscr.addstr(bottom - 1, col, "\u2500" * inner_w, curses.A_DIM)
+        stdscr.addstr(bottom - 2, col, "\u2500" * inner_w, curses.A_DIM)
     except curses.error:
         pass
-    hints = "c:commit s:stage u:unstage a:stage all d:diff p:push P:pull b:branch S:stash A:pop I:issues M:PRs"
+    # Action buttons row
+    actions = []
+    if panel.committing:
+        actions.append("\u2713 Commit")
+    else:
+        actions.append("c:Commit")
+    actions.append("R:Refresh")
+    if panel.ahead or panel.behind:
+        actions.append("P:Pull")
+    else:
+        actions.append("P:Pull")
+    actions.append("p:Push")
+    action_text = " \u2502 ".join(actions)
+    try:
+        stdscr.addstr(bottom - 1, col, action_text[:inner_w], curses.A_DIM)
+    except curses.error:
+        pass
+    # Key hints row
+    hints = "s:stage u:unstage S:stage all U:unstage all d:diff b:branch"
     try:
         stdscr.addstr(bottom, col, hints[:inner_w], curses.A_DIM)
     except curses.error:
@@ -560,7 +635,7 @@ def git_panel_key(panel: GitPanel, key: str | int) -> bool:
     Returns True if the key was consumed.
     """
     # Commit mode — any key
-    if panel.mode == "commit":
+    if panel.committing:
         if key == "\n":
             panel.do_commit()
         elif key == "\x1b":
@@ -633,8 +708,10 @@ def git_panel_key(panel: GitPanel, key: str | int) -> bool:
         panel.stage_selected()
     elif key == "u":
         panel.unstage_selected()
-    elif key == "a":
+    elif key == "S":
         panel.stage_all()
+    elif key == "U":
+        panel.unstage_all()
     elif key == "d":
         panel.begin_diff()
     elif key == "p":
@@ -643,10 +720,9 @@ def git_panel_key(panel: GitPanel, key: str | int) -> bool:
         panel.do_pull()
     elif key == "b":
         panel.begin_branch_select()
-    elif key == "S":
-        panel.do_stash()
-    elif key == "A":
-        panel.do_stash_pop()
+    elif key == "R":
+        panel.refresh()
+        panel.last_result = "Refreshed"
     elif key == "I":
         panel.begin_issues()
     elif key == "M":
