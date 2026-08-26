@@ -622,11 +622,11 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int,
 # ------------------------------------------------------------------ #
 
 def _is_up(key: str | int) -> bool:
-    return key == "up" or key == "k" or key == curses.KEY_UP
+    return key == "up" or key == curses.KEY_UP
 
 
 def _is_down(key: str | int) -> bool:
-    return key == "down" or key == "j" or key == curses.KEY_DOWN
+    return key == "down" or key == curses.KEY_DOWN
 
 
 def git_panel_key(panel: GitPanel, key: str | int) -> bool:

@@ -122,13 +122,13 @@ class TestDiffViewerKey(unittest.TestCase):
         result = diff_viewer_key(self.v, "\x1b", self.ph)
         self.assertFalse(result)
 
-    def test_j_scrolls_down(self):
-        diff_viewer_key(self.v, "j", self.ph)
+    def test_down_scrolls_down(self):
+        diff_viewer_key(self.v, "down", self.ph)
         self.assertEqual(self.v.scroll_y, 1)
 
-    def test_k_scrolls_up(self):
+    def test_up_scrolls_up(self):
         self.v.scroll(3)
-        diff_viewer_key(self.v, "k", self.ph)
+        diff_viewer_key(self.v, "up", self.ph)
         self.assertEqual(self.v.scroll_y, 2)
 
     def test_space_pages_down(self):

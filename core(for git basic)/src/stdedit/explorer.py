@@ -268,6 +268,79 @@ class FileExplorer:
         return path, None
 
     # ------------------------------------------------------------------ #
+    # File operations (delete, rename, copy path)
+    # ------------------------------------------------------------------ #
+
+    def delete_selected(self) -> tuple[bool, str]:
+        """Delete the selected file or folder.
+
+        Returns ``(ok, message)`` where *ok* is True on success.
+        """
+        item = self.get_selected()
+        if not item:
+            return False, "No item selected"
+        _, _, path, is_dir = item
+        if path == PARENT:
+            return False, "Cannot delete parent entry"
+        try:
+            if is_dir:
+                import shutil
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+        except OSError as exc:
+            return False, f"Delete failed: {exc}"
+        self.refresh()
+        return True, f"Deleted {os.path.basename(path)}"
+
+    def rename_selected(self, new_name: str) -> tuple[bool, str]:
+        """Rename the selected item to *new_name*.
+
+        Returns ``(ok, message)`` where *ok* is True on success.
+        """
+        item = self.get_selected()
+        if not item:
+            return False, "No item selected"
+        _, _, path, is_dir = item
+        if path == PARENT:
+            return False, "Cannot rename parent entry"
+        err = self._validate_entry_name(new_name)
+        if err:
+            return False, err
+        parent = os.path.dirname(path)
+        new_path = os.path.join(parent, new_name)
+        if os.path.exists(new_path):
+            return False, f"'{new_name}' already exists"
+        try:
+            os.rename(path, new_path)
+        except OSError as exc:
+            return False, f"Rename failed: {exc}"
+        self.refresh()
+        self._select_path(new_path)
+        return True, f"Renamed to {new_name}"
+
+    def copy_path(self) -> str:
+        """Return the absolute path of the selected item."""
+        item = self.get_selected()
+        if not item:
+            return ""
+        _, _, path, _ = item
+        return path if path != PARENT else ""
+
+    def copy_relative_path(self) -> str:
+        """Return the path relative to the tree root."""
+        item = self.get_selected()
+        if not item:
+            return ""
+        _, _, path, _ = item
+        if path == PARENT:
+            return ""
+        try:
+            return os.path.relpath(path, self.root_dir)
+        except ValueError:
+            return path
+
+    # ------------------------------------------------------------------ #
     # Internals
     # ------------------------------------------------------------------ #
     def _is_visible(self, name: str) -> bool:

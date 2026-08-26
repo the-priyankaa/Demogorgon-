@@ -40,8 +40,12 @@ from . import filemanager
 from . import icons
 from . import settings
 from . import git
+from . import clipboard
 from .git_panel import GitPanel, init_panel_colors, draw_git_panel, git_panel_key
 from .diff_viewer import DiffViewer, init_diff_colors, draw_diff_overlay, diff_viewer_key
+from .quick_open import QuickOpen
+from . import recent
+from . import completion
 
 _COLOR_PAIRS = {
     "keyword": 1,
@@ -231,6 +235,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     _git_counts: dict[str, int] = {"modified": 0, "added": 0, "deleted": 0, "untracked": 0}
     _git_refresh_time = 0.0
     _git_refresh_interval = 2.0  # seconds between git status refreshes
+    quick_open = QuickOpen(root_dir)
     while True:
         frame_started = meter.frame_start()
         stdscr.erase()
@@ -353,6 +358,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                                help_scroll)
         if show_settings:
             _draw_settings_overlay(stdscr, settings_idx)
+        if quick_open.visible:
+            _draw_quick_open_overlay(stdscr, quick_open)
 
         stdscr.move(
             buf.cursor_y - buf.scroll_y,
@@ -455,6 +462,36 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 settings.toggle_radio(settings.LABELS[settings_idx][0])
             elif key in ("\x1b", "\x10", "q"):
                 show_settings = False
+            continue
+
+        # Quick Open overlay (Ctrl-O).
+        if quick_open.visible:
+            if key in ("\x1b", "\x0f"):
+                quick_open.close()
+                status = ""
+            elif key == "\n" or key == "\r":
+                path = quick_open.selected_path()
+                if path:
+                    quick_open.close()
+                    language, status = open_file_path(
+                        stdscr, buf, explorer, path,
+                        render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
+                    )
+                    if status.startswith("Opened"):
+                        buf.configure_for_language(language)
+                        explorer.active = False
+                        recent.add_recent(path)
+                else:
+                    quick_open.close()
+                    status = "No file selected"
+            elif key == curses.KEY_UP:
+                quick_open.move_selection(-1)
+            elif key == curses.KEY_DOWN:
+                quick_open.move_selection(1)
+            elif key in (curses.KEY_BACKSPACE, "\x7f", "\b"):
+                quick_open.update_query(quick_open.query[:-1])
+            elif isinstance(key, str) and len(key) == 1 and key.isprintable():
+                quick_open.update_query(quick_open.query + key)
             continue
 
         editor.status = status
@@ -623,6 +660,57 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 opened, info = filemanager.reveal_in_file_manager(explorer.root_dir)
                 status = f"Opened in {info}" if opened else f"Reveal failed: {info}"
                 continue
+            elif key == "d":  # delete selected file/folder
+                item = explorer.get_selected()
+                if item:
+                    _, _, path, is_dir = item
+                    if path == "..":
+                        status = "Cannot delete parent entry"
+                    else:
+                        render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
+                        name = os.path.basename(path)
+                        kind = "folder" if is_dir else "file"
+                        msg = f"Delete {kind} '{name}'? (y/n)"
+                        if _yes_no_prompt(lambda: _get_key(stdscr), render, msg):
+                            ok, msg = explorer.delete_selected()
+                            status = msg
+                            if ok and buf.filename and not os.path.exists(buf.filename):
+                                buf.filename = None
+                                buf.modified = False
+                        else:
+                            status = "Cancelled"
+                continue
+            elif key == "r":  # rename selected file/folder
+                item = explorer.get_selected()
+                if item:
+                    _, _, path, _ = item
+                    if path == "..":
+                        status = "Cannot rename parent entry"
+                    else:
+                        render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
+                        old_name = os.path.basename(path)
+                        new_name = _prompt_line(
+                            lambda: _get_key(stdscr), render,
+                            f"Rename '{old_name}': ",
+                        )
+                        if new_name:
+                            ok, msg = explorer.rename_selected(new_name)
+                            status = msg
+                        else:
+                            status = "Cancelled"
+                continue
+            elif key == "y":  # yank/copy absolute path to clipboard
+                path = explorer.copy_path()
+                if path:
+                    clipboard.sys_copy(path)
+                    status = f"Copied: {path}"
+                continue
+            elif key == "Y":  # yank/copy relative path to clipboard
+                path = explorer.copy_relative_path()
+                if path:
+                    clipboard.sys_copy(path)
+                    status = f"Copied: {path}"
+                continue
             elif key in ("\t", "\x05", "\x1b"):  # Tab / Ctrl-E / Esc -> editor
                 explorer.active = False
                 status = ""
@@ -709,39 +797,13 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                     buf.paste(pasted)
                     status = f"Pasted {len(pasted)} chars"
             # else: plain ESC / unrecognized escape sequence — ignored for now
-        elif key == "\x0f":  # Ctrl-O: open a file by typed path
-            render = lambda t: _draw_status_prompt(stdscr, t)  # noqa: E731
-            target = _prompt_line(lambda: _get_key(stdscr), render)
-            if target:
-                expanded = os.path.expanduser(target)
-                can_open = True
-                if not os.path.exists(expanded):
-                    # Create-before-editing: offer to make the missing file.
-                    can_open = False
-                    msg = f"'{target}' not found - create it? (y/n)"
-                    if _yes_no_prompt(lambda: _get_key(stdscr), render, msg):
-                        parent = os.path.dirname(expanded) or "."
-                        if not os.path.isdir(parent):
-                            status = f"Cannot create: no folder {parent}"
-                        else:
-                            try:
-                                with open(expanded, "x"):
-                                    pass
-                                can_open = True
-                            except OSError as exc:
-                                status = f"Cannot create file: {exc}"
-                    else:
-                        status = "Cancelled"
-                if can_open:
-                    language, status = open_file_path(
-                        stdscr, buf, explorer, expanded,
-                        render_unsaved=render,
-                    )
-                    if status.startswith("Opened"):
-                        buf.configure_for_language(language)
-                        explorer.active = False
+        elif key == "\x0f":  # Ctrl-O: Quick Open (fuzzy file search)
+            if quick_open.visible:
+                quick_open.close()
+                status = ""
             else:
-                status = "Open cancelled"
+                quick_open.open()
+                status = ""
         elif key == "\x06":  # Ctrl-F: find in buffer
             explorer.active = False
             _find_replace_prompt(stdscr, buf, mode="find",
@@ -1058,8 +1120,7 @@ HELP_SECTIONS = [
         "Ctrl-Y              redo",
         "Ctrl-S              save current file",
         "Ctrl-P              settings / preferences",
-        "Ctrl-O              open a file by typed path (~ supported;",
-        "                    offers to create it if missing)",
+        "Ctrl-O              quick open — fuzzy file search",
         "Ctrl-Q              quit (press again to force with changes)",
     ]),
     ("FILE TREE (Ctrl-E panel)", [
@@ -1072,6 +1133,10 @@ HELP_SECTIONS = [
         "h                   show / hide dotfiles",
         "n                   new file (opens it for editing)",
         "N                   new folder in selected folder",
+        "d                   delete file / folder (with confirmation)",
+        "r                   rename file / folder",
+        "y                   copy absolute path to clipboard",
+        "Y                   copy relative path to clipboard",
         "O                   pick project root via system dialog",
         "R                   reveal root in system file manager",
         "Tab / Esc           focus the editor",
@@ -1083,7 +1148,7 @@ HELP_SECTIONS = [
     ]),
     ("SOURCE CONTROL (Ctrl-G panel)", [
         "Ctrl-G              open / close source control panel",
-        "j / k               move selection",
+        "Up / Down           move selection",
         "c                   focus commit message box",
         "Enter               commit (when message box focused)",
         "Esc                 cancel commit / defocus panel",
@@ -1103,7 +1168,7 @@ HELP_SECTIONS = [
     ("DIFF VIEWER", [
         "d / Space           page down",
         "u                   page up",
-        "j / k               scroll one line",
+        "Up / Down           scroll one line",
         "g / G               jump to top / bottom",
         "q / Esc             close diff view",
     ]),
@@ -1120,11 +1185,12 @@ HELP_SECTIONS = [
     ("TERMINAL & PROMPTS", [
         "terminal paste      bracketed paste inserts multi-line text",
         "typed prompts       Enter confirms, Esc cancels",
-        "prompt Backspace    edits the text (new file/folder, open path)",
+        "prompt Tab          autocomplete file paths",
+        "prompt Backspace    edits the text (new file/folder, O fallback)",
         "icons               Nerd Font glyphs (e.g. MesloLGS NF);",
         "                    disable with STDEDIT_ICONS=0",
         "",
-        "(prompts appear for n / Ctrl-O and the O path fallback)",
+        "(prompts appear for n / O and the O path fallback)",
     ]),
     ("HELP", [
         "Ctrl-H or F1        open / close this guide",
@@ -1243,6 +1309,64 @@ def _draw_help_overlay(stdscr, lines, offset=0):
             curses.A_REVERSE)
 
 
+def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
+    """Paint a centered bordered quick-open box with fuzzy results."""
+    height, width = stdscr.getmaxyx()
+    items = qo.get_display_items(limit=max(1, height - 6))
+    inner_w = max(40, min(60, width * 60 // 100))
+    inner_w = min(inner_w, width - 2)
+    total = len(items)
+    view_h = max(1, min(total, height - 6))
+    box_h = view_h + 4  # title + input + separator + items + bottom
+    top = max(0, (height - box_h) // 2)
+    left = max(0, (width - inner_w) // 2)
+
+    def put(row, col, text, attr=0):
+        try:
+            stdscr.addstr(row, col, text[:width - col], attr)
+        except curses.error:
+            pass
+
+    # Title
+    title = " Open File "
+    put(top, left, "\u250c" + title.center(inner_w - 2)[:inner_w - 2] + "\u2510",
+        curses.A_REVERSE)
+    # Input line
+    put(top + 1, left, "\u2502", curses.A_DIM)
+    query_display = qo.query + " "
+    padding = inner_w - 2 - len(query_display)
+    put(top + 1, left + 1, " " + query_display + " " * max(0, padding), curses.A_UNDERLINE)
+    put(top + 1, left + inner_w - 1, "\u2502", curses.A_DIM)
+    # Separator
+    put(top + 2, left, "\u251c" + "\u2500" * (inner_w - 2) + "\u2524", curses.A_DIM)
+    # Items
+    if not items:
+        if qo.query:
+            put(top + 3, left + 1, " No matches", curses.A_DIM)
+        else:
+            put(top + 3, left + 1, " Type to search files...", curses.A_DIM)
+    else:
+        for i, (display_path, is_sel) in enumerate(items):
+            if i >= view_h:
+                break
+            # Show just the path relative to root if possible
+            short = display_path
+            if short.startswith(qo.root_dir):
+                short = short[len(qo.root_dir):]
+                if short.startswith("/"):
+                    short = short[1:]
+            # Truncate if too long
+            avail = inner_w - 4
+            if len(short) > avail:
+                short = "..." + short[-(avail - 3):]
+            marker = "\u25b6 " if is_sel else "   "
+            attr = curses.A_REVERSE if is_sel else 0
+            put(top + 3 + i, left + 1, (marker + short)[:inner_w - 2], attr)
+    # Bottom border
+    put(top + box_h - 1, left,
+        "\u2514" + "\u2500" * (inner_w - 2) + "\u2518")
+
+
 def _draw_settings_overlay(stdscr, selected_idx: int) -> None:
     """Paint a centered bordered settings box with toggleable options."""
     height, width = stdscr.getmaxyx()
@@ -1353,7 +1477,7 @@ def _yes_no_prompt(read_key, render, message) -> bool:
 
 
 def _prompt_line(read_key, render, title: str = "Open file: ") -> Optional[str]:
-    """Minimal single-line prompt. Returns the entered text, or None on cancel."""
+    """Minimal single-line prompt with tab completion. Returns entered text or None."""
     text = ""
     while True:
         render(title + text)
@@ -1367,6 +1491,12 @@ def _prompt_line(read_key, render, title: str = "Open file: ") -> Optional[str]:
             return None
         if k in ("\x7f", "\b", curses.KEY_BACKSPACE):
             text = text[:-1]
+        elif k == "\t":  # Tab completion
+            matches = completion.complete_path(text)
+            if len(matches) == 1:
+                text = matches[0]
+            elif len(matches) > 1:
+                text = completion.common_prefix(matches)
         elif isinstance(k, str) and k.isprintable():
             text += k
 
@@ -1414,6 +1544,7 @@ def open_file_path(stdscr, buf: Buffer, explorer: Optional[FileExplorer], path: 
             # Outside the current tree: re-root at the file's folder.
             explorer.set_root(parent)
         explorer.current_path = abs_path
+    recent.add_recent(path)
     return language, f"Opened {path}"
 
 

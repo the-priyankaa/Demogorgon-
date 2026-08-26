@@ -98,7 +98,7 @@ def draw_diff_overlay(
         pass
 
     # Hint bar at bottom
-    hints = " j/k:scroll  d/Space:pgdn  u/PgUp:pgup  g/G:home/end  q/Esc:close"
+    hints = " \u2191\u2193:scroll  d/Space:pgdn  u/PgUp:pgup  g/G:home/end  q/Esc:close"
     try:
         stdscr.addstr(height - 1, 0, hints[:width], curses.A_DIM)
     except curses.error:
@@ -148,9 +148,9 @@ def diff_viewer_key(viewer: DiffViewer, key: str | int, page_height: int) -> boo
     """Handle a keypress in the diff viewer. Returns True if consumed."""
     if key == "q" or key == "\x1b":
         return False  # signal close
-    elif key in ("j", "down", curses.KEY_DOWN):
+    elif key in ("down", curses.KEY_DOWN):
         viewer.scroll(1)
-    elif key in ("k", "up", curses.KEY_UP):
+    elif key in ("up", curses.KEY_UP):
         viewer.scroll(-1)
     elif key in ("d", " ", "\x06"):  # d / Space / Ctrl-F
         viewer.page_down(page_height)
