@@ -33,7 +33,7 @@ import time
 
 from .buffer import Buffer
 from .languages import schema
-from .perf import PerfMeter
+from .perf import PerfMeter, format_bytes
 from .extensions import ExtensionAPI, load_extensions, load_requested_extensions
 from .explorer import FileExplorer
 from . import filemanager
@@ -46,6 +46,7 @@ from .diff_viewer import DiffViewer, init_diff_colors, draw_diff_overlay, diff_v
 from .quick_open import QuickOpen
 from . import recent
 from . import completion
+from . import dashboard
 from . import themes
 
 _COLOR_PAIRS = {
@@ -298,6 +299,7 @@ def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None
     curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
     curses.mouseinterval(0)
     icons_on = icons.enabled_from_env()
+    dashboard.init_colors()
 
     language = schema.detect_language(buf.filename or "")
     buf.configure_for_language(language)
@@ -327,13 +329,13 @@ def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None
             status = (status + "  " if status else "") + f"{len(extension_errors)} extension error(s)"
         hint = "File tree active — Enter opens file/folder, Esc to focus editor, Ctrl-H help"
         status = (status + "   " if status else "") + hint
-        _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer, icons_on, root_dir, git_panel, diff_viewer)
+        _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer, icons_on, root_dir, git_panel, diff_viewer, project_dir)
     finally:
         extensions.shutdown()
         _disable_bracketed_paste()
 
 
-def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext, explorer: FileExplorer, icons_on: bool = False, root_dir: str = ".", git_panel: GitPanel | None = None, diff_viewer: DiffViewer | None = None) -> None:
+def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext, explorer: FileExplorer, icons_on: bool = False, root_dir: str = ".", git_panel: GitPanel | None = None, diff_viewer: DiffViewer | None = None, project_dir: str | None = None) -> None:
     show_help = False
     show_settings = False
     settings_idx = 0
@@ -345,9 +347,89 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     _git_counts: dict[str, int] = {"modified": 0, "added": 0, "deleted": 0, "untracked": 0}
     _git_refresh_time = 0.0
     _git_refresh_interval = 2.0  # seconds between git status refreshes
-    quick_open = QuickOpen(root_dir)
+    dashboard_active = (buf.filename is None and project_dir is None)
+    search_root = os.path.expanduser("~") if dashboard_active else root_dir
+    package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    excluded_search_roots = [package_root] if dashboard_active else []
+    quick_open = QuickOpen(search_root, exclude_roots=excluded_search_roots, show_recent_on_empty=False)
+    dashboard_selected = 0
+    dashboard_started = time.perf_counter()
     while True:
         frame_started = meter.frame_start()
+        if dashboard_active:
+            meter.frame_end(frame_started)
+            dashboard.draw(
+                stdscr,
+                dashboard_selected,
+                time.perf_counter() - dashboard_started,
+                format_bytes(meter.rss),
+            )
+            key = _get_key(stdscr)
+            if key in ("q", "Q", "\x11"):
+                return
+            if key in (curses.KEY_UP,):
+                dashboard_selected = (dashboard_selected - 1) % dashboard.action_count()
+                continue
+            if key in (curses.KEY_DOWN, "\t"):
+                dashboard_selected = (dashboard_selected + 1) % dashboard.action_count()
+                continue
+            if key in ("\n", "\r", " "):
+                key = dashboard.action_key(dashboard_selected)
+            if key in ("f", "F") or key == curses.KEY_F1:
+                explorer.set_root(os.path.expanduser("~"))
+                explorer.active = False
+                explorer.visible = False
+                quick_open.open()
+                stdscr.timeout(50)
+                dashboard_active = False
+                continue
+            if key in ("r", "R"):
+                explorer.set_root(os.path.expanduser("~"))
+                explorer.active = False
+                explorer.visible = False
+                quick_open = QuickOpen(os.path.expanduser("~"), exclude_roots=excluded_search_roots, show_recent_on_empty=True)
+                quick_open.open(background_index=False)
+                stdscr.timeout(50)
+                dashboard_active = False
+                continue
+            if key in ("n", "N"):
+                dashboard_active = False
+                explorer.set_root(os.path.expanduser("~"))
+                explorer.active = True
+                root_dir = os.path.expanduser("~")
+                quick_open = QuickOpen(root_dir, show_recent_on_empty=False)
+                status = "New file: use the tree or save to choose a filename"
+                continue
+            if key in ("c", "C"):
+                dashboard_active = False
+                show_settings = True
+                explorer.visible = False
+                continue
+            if key in ("s", "S"):
+                items = recent.get_recent()
+                path = next((p for p in items if os.path.isfile(p)), None)
+                if path:
+                    language, status = open_file_path(
+                        stdscr, buf, explorer, path,
+                        render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
+                    )
+                    if status.startswith("Opened"):
+                        buf.configure_for_language(language)
+                        explorer.active = False
+                        dashboard_active = False
+                else:
+                    status = "No recent file to restore"
+                continue
+            if key in ("l", "L"):
+                dashboard_active = False
+                explorer.visible = False
+                explorer.active = False
+                status = "Lightweight editor ready"
+                continue
+            if key in ("g", "G"):
+                status = "Find Text operates on the current file; open a file first"
+                continue
+            continue
         stdscr.erase()
         height, width = stdscr.getmaxyx()
         text_height = height - 1  # reserve last row for status line
@@ -664,13 +746,17 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         # Quick Open overlay (Ctrl-O).
         if quick_open.visible:
+            if key is None:
+                continue
             if key in ("\x1b", "\x0f"):
                 quick_open.close()
+                stdscr.timeout(-1)
                 status = ""
             elif key == "\n" or key == "\r":
                 path = quick_open.selected_path()
                 if path:
                     quick_open.close()
+                    stdscr.timeout(-1)
                     language, status = open_file_path(
                         stdscr, buf, explorer, path,
                         render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
@@ -681,6 +767,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                         recent.add_recent(path)
                 else:
                     quick_open.close()
+                    stdscr.timeout(-1)
                     status = "No file selected"
             elif key == curses.KEY_UP:
                 quick_open.move_selection(-1)
@@ -998,9 +1085,11 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         elif key == "\x0f":  # Ctrl-O: Quick Open (fuzzy file search)
             if quick_open.visible:
                 quick_open.close()
+                stdscr.timeout(-1)
                 status = ""
             else:
                 quick_open.open()
+                stdscr.timeout(50)
                 status = ""
         elif key == "\x06":  # Ctrl-F: find in buffer
             explorer.active = False
@@ -1547,9 +1636,17 @@ def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
     # Items
     if not items:
         if qo.query:
-            put(top + 3, left + 1, " No matches", curses.A_DIM)
+            if qo.loading:
+                msg = f" Searching...  ({len(qo.files)} files indexed)"
+            elif qo.scan_error:
+                msg = f" Search error: {qo.scan_error}"
+            else:
+                direct = qo._direct_candidate()
+                msg = " Press Enter to open typed path" if direct else " No matches"
+            put(top + 3, left + 1, msg, curses.A_DIM)
         else:
-            put(top + 3, left + 1, " Type to search files...", curses.A_DIM)
+            msg = " Recent files" if qo.show_recent_on_empty else " Type to search files..."
+            put(top + 3, left + 1, msg, curses.A_DIM)
     else:
         for i, (display_path, is_sel) in enumerate(items):
             if i >= view_h:

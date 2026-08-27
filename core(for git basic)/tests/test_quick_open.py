@@ -99,8 +99,12 @@ class TestQuickOpen(unittest.TestCase):
             qo = QuickOpen(d)
             qo.open()
             qo.update_query("hello")
+            deadline = __import__("time").time() + 2.0
+            while __import__("time").time() < deadline and not qo.results:
+                __import__("time").sleep(0.01)
             self.assertEqual(len(qo.results), 1)
             self.assertIn("hello.py", qo.results[0][1])
+            qo.close()
         finally:
             shutil.rmtree(d)
 

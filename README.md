@@ -6,7 +6,7 @@ Zero-dependency terminal text editor. Python stdlib only.
 
 ![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue)
 ![Zero Deps](https://img.shields.io/badge/deps-zero-brightgreen)
-![Tests](https://img.shields.io/badge/tests-489-passing)
+![Tests](https://img.shields.io/badge/tests-499-passing)
 ![Version](https://img.shields.io/badge/version-0.1.0-orange)
 
 ## Quick Start
@@ -46,9 +46,10 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 **Themes** — 15 built-in color themes: default, Monokai, Dracula, Solarized Dark, Solarized Light, Nord, One Dark, Tokyo Night, Gruvbox Dark, Catppuccin Mocha, Rose Pine, GitHub Light, Zenburn, Everforest, Ayu
 
 **Panels & Overlays**
+- Welcome Dashboard (opens with no file/project): YUKI front panel with Find File, New File, Recent Files, Config, Restore Session and more
 - File Explorer (`Ctrl-E`): tree view, search, create, delete, rename, copy path
 - Source Control (`Ctrl-G`): stage, unstage, commit, push, pull, branch switch, stash
-- Quick Open (`Ctrl-O`): fuzzy file search
+- Quick Open (`Ctrl-O`): fuzzy file search — background indexing, home-directory search from the dashboard, recent-files fallback
 - Diff Viewer: scrollable unified diff with syntax colors
 - Settings (`Ctrl-P`): auto-save mode, theme, font family selection
 - Help (`Ctrl-H` / `F1`): scrollable keybinding reference
@@ -230,6 +231,11 @@ q / Esc / Enter     close this guide
 stdedit [file] [options]
 ```
 
+Running `stdedit` with no file (and no `--project`) opens the **welcome
+dashboard**: ↑/↓ navigate its actions, Enter activates, or press the key
+shown on each tile (`F1` Find File, `N` New File, `R` Recent, `C` Config,
+`S` Restore Session, `L` Lazy editable buffer, `Q`/Ctrl-Q quit).
+
 | Option | Description |
 |--------|-------------|
 | `file` | File to open (or directory to open as project) |
@@ -314,7 +320,7 @@ def setup(api):
 | Command | Description |
 |---------|-------------|
 | `make run FILE=file.py` | Run the editor |
-| `make test` | Run all tests (489 tests) |
+| `make test` | Run all tests (499 tests) |
 | `make proof` | Verify zero dependencies |
 | `make clean` | Remove `__pycache__` and artifacts |
 
@@ -347,7 +353,8 @@ src/stdedit/
 ├── icons.py             Nerd Font glyph mapping
 ├── install.py           'carl' installer (venv + symlinks)
 ├── perf.py              RSS memory + frame timing
-├── quick_open.py        Fuzzy file search
+├── dashboard.py         YUKI welcome dashboard (front panel)
+├── quick_open.py        Fuzzy file search (async, background index)
 ├── recent.py            Recently opened files (JSON)
 ├── settings.py          Persistent editor settings (JSON)
 ├── themes.py            Color themes (syntax, git, diff palettes)
