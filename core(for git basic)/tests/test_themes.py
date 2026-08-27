@@ -57,6 +57,19 @@ class TestThemeHelpers(unittest.TestCase):
     def test_git_color_has_value(self):
         self.assertEqual(themes.git_color("default", "M"), 3)
 
+    def test_new_themes_present(self):
+        for tid in ["tokyo_night", "gruvbox_dark", "catppuccin_mocha",
+                    "rose_pine", "github_light", "zenburn", "everforest", "ayu"]:
+            self.assertIn(tid, themes.THEME_ORDER)
+            self.assertIn("theme_" + tid, themes.theme_keys())
+            self.assertIn(tid, themes.THEMES)
+            self.assertTrue(themes.THEMES[tid]["name"])
+
+    def test_new_theme_names(self):
+        self.assertEqual(themes.THEMES["tokyo_night"]["name"], "Tokyo Night")
+        self.assertEqual(themes.THEMES["gruvbox_dark"]["name"], "Gruvbox Dark")
+        self.assertEqual(themes.THEMES["ayu"]["name"], "Ayu")
+
 
 class TestResolve(unittest.TestCase):
     def test_resolve_256_unchanged(self):

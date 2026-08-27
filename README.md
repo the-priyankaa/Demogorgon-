@@ -6,7 +6,7 @@ Zero-dependency terminal text editor. Python stdlib only.
 
 ![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue)
 ![Zero Deps](https://img.shields.io/badge/deps-zero-brightgreen)
-![Tests](https://img.shields.io/badge/tests-465-passing)
+![Tests](https://img.shields.io/badge/tests-477-passing)
 ![Version](https://img.shields.io/badge/version-0.1.0-orange)
 
 ## Quick Start
@@ -43,7 +43,7 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 
 **Syntax Highlighting** — 17 languages: Python, JavaScript, TypeScript, HTML, CSS, C, C++, Java, Rust, Go, JSON, YAML, Markdown, Shell, SQL, XML, plaintext
 
-**Themes** — 7 built-in color themes: default, Monokai, Dracula, Solarized Dark, Solarized Light, Nord, One Dark
+**Themes** — 15 built-in color themes: default, Monokai, Dracula, Solarized Dark, Solarized Light, Nord, One Dark, Tokyo Night, Gruvbox Dark, Catppuccin Mocha, Rose Pine, GitHub Light, Zenburn, Everforest, Ayu
 
 **Panels & Overlays**
 - File Explorer (`Ctrl-E`): tree view, search, create, delete, rename, copy path
@@ -181,11 +181,14 @@ Backspace           delete last query character
 
 ```
 Ctrl-P              open / close settings panel
-Up / Down           navigate settings
-Space               toggle selected setting
+Up / Down           navigate settings (section headers too)
+Space / Enter       toggle a setting, or expand/collapse a section
+▸ / ▾               collapsed / expanded section header
+click header        expand / collapse a section
+click setting       select it (Space to toggle)
 q / Esc / Ctrl-P    close settings panel
 ```
-`auto-save`, `theme`, and `font family` are radio groups — `Space` on any option activates it and turns the others off.
+`auto-save`, `theme`, and `font family` are collapsible dropdown sections (all collapsed when opened) — `Space`/`Enter` or a click on a section header expands or collapses it. Only one section stays open: opening or navigating to another closes the current one. Within a section, `Space` on any option activates it and turns the others off.
 
 ### Mouse
 
@@ -257,7 +260,7 @@ make deps-fix       # auto-install missing helpers via detected package manager
 
 **Auto-save modes:** off (default), on idle (5s), periodic (30s), on every edit
 
-**Themes:** default, Monokai, Dracula, Solarized Dark, Solarized Light, Nord, One Dark. On 256-color terminals each theme uses its true palette; fewer colors fold tones to the closest base color.
+**Themes:** default, Monokai, Dracula, Solarized Dark, Solarized Light, Nord, One Dark, Tokyo Night, Gruvbox Dark, Catppuccin Mocha, Rose Pine, GitHub Light, Zenburn, Everforest, Ayu. On 256-color terminals each theme uses its true palette; fewer colors fold tones to the closest base color.
 
 **Font family:** Detects installed monospace fonts via `fc-list` and tries to switch terminal font via OSC 50 escape sequences (works in xterm, Konsole, iTerm2; best-effort in other terminals).
 
@@ -309,7 +312,7 @@ def setup(api):
 | Command | Description |
 |---------|-------------|
 | `make run FILE=file.py` | Run the editor |
-| `make test` | Run all tests (465 tests) |
+| `make test` | Run all tests (477 tests) |
 | `make proof` | Verify zero dependencies |
 | `make clean` | Remove `__pycache__` and artifacts |
 

@@ -92,6 +92,91 @@ def _setting_key_group(key: str) -> str | None:
     return None
 
 
+def _settings_sections() -> list[str]:
+    """Return the settings section labels in LABELS order."""
+    return [label for key, label in settings.LABELS if key is None and label]
+
+
+def _settings_close_others(expanded: dict[str, bool], keep: str | None) -> None:
+    """Collapse every settings section except *keep* (None keeps none).
+
+    Gives the panel single-open (accordion) behavior: opening or moving to
+    a section closes any other open section.
+    """
+    for label in _settings_sections():
+        if label != keep:
+            expanded[label] = False
+
+
+def _settings_nav_indices(expanded: dict[str, bool]) -> list[int]:
+    """Return LABELS indices of navigable settings rows.
+
+    Section headers are always navigable; a setting row is navigable only
+    while its section is expanded.  With every section collapsed this is
+    exactly the header rows, which turns the panel into a dropdown list.
+    """
+    result: list[int] = []
+    section: str | None = None
+    for i, (key, label) in enumerate(settings.LABELS):
+        if key is None:
+            if label:
+                section = label
+                result.append(i)
+        elif section is not None and expanded.get(section, False):
+            result.append(i)
+    return result
+
+
+def _settings_header_index(label: str) -> int:
+    """Return the LABELS index of the header row for *label*."""
+    for i, (key, l) in enumerate(settings.LABELS):
+        if key is None and l == label:
+            return i
+    return 0
+
+
+def _settings_display_rows(expanded: dict[str, bool]) -> list[tuple]:
+    """Build the visible panel rows honoring *expanded* sections.
+
+    Row shapes: ("header", label, lbl_idx), ("separator",),
+    ("gap",), ("item", key, label, on, lbl_idx).
+    """
+    rows: list[tuple] = []
+    section: str | None = None
+    last_was_item = False
+    for lbl_idx, (key, label) in enumerate(settings.LABELS):
+        if key is None:
+            if label:
+                section = label
+                rows.append(("header", label, lbl_idx))
+                if expanded.get(label, False):
+                    rows.append(("separator",))
+                last_was_item = False
+            else:
+                if last_was_item:
+                    rows.append(("gap",))
+                last_was_item = False
+        elif section is not None and expanded.get(section, False):
+            rows.append(("item", key, label, settings.get(key), lbl_idx))
+            last_was_item = True
+        else:
+            last_was_item = False
+    return rows
+
+
+def _settings_display_layout(expanded: dict[str, bool], selected_idx: int,
+                             draw_height: int) -> tuple[list[tuple], int]:
+    """Return (visible rows, scroll start) centered on the selection."""
+    rows = _settings_display_rows(expanded)
+    sel_pos = 0
+    for pos, row in enumerate(rows):
+        if row[0] in ("header", "item") and row[-1] == selected_idx:
+            sel_pos = pos
+            break
+    start_idx = max(0, sel_pos - draw_height // 2)
+    return rows, start_idx
+
+
 class EditorContext:
     """Small extension-facing editor context shared with the core TUI."""
     def __init__(self, buf: Buffer, stdscr=None):
@@ -252,6 +337,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     show_help = False
     show_settings = False
     settings_idx = 0
+    expanded_sections: dict[str, bool] = {}
     _last_edit_time = time.time()
     _last_save_time = time.time()
     _auto_save_flag = False
@@ -290,7 +376,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         # Draw settings panel (replaces explorer as left sidebar)
         if show_settings:
-            _draw_settings_overlay(stdscr, settings_idx, settings_panel_width)
+            _draw_settings_overlay(stdscr, settings_idx, settings_panel_width,
+                                   expanded_sections)
 
         # Handle diff overlay early (covers full screen)
         if git_panel and git_panel.visible and git_panel.mode == "diff":
@@ -444,6 +531,27 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 continue
 
             if bstate & curses.BUTTON1_PRESSED:
+                # Click on the settings panel → dropdown interaction.
+                if show_settings and mx < settings_panel_width and my < text_height:
+                    now = time.monotonic()
+                    multi = now - _last_click_time < _CLICK_THRESHOLD
+                    _last_click_time = now
+                    rows, start_idx = _settings_display_layout(
+                        expanded_sections, settings_idx, text_height)
+                    row_pos = start_idx + my
+                    if 0 <= row_pos < len(rows):
+                        row = rows[row_pos]
+                        if row[0] == "header":
+                            if not multi:
+                                if expanded_sections.get(row[1], False):
+                                    expanded_sections[row[1]] = False
+                                else:
+                                    _settings_close_others(expanded_sections, row[1])
+                                    expanded_sections[row[1]] = True
+                            settings_idx = row[2]
+                        elif row[0] == "item":
+                            settings_idx = row[4]
+                    continue
                 # Click in text area only.
                 if (my < text_height
                         and gutter_width + left_offset <= mx < gutter_width + left_offset + text_width):
@@ -518,22 +626,38 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         # Settings overlay (Ctrl-P).
         if key == "\x10" and not explorer.searching:
             show_settings = not show_settings
-            settings_idx = next(i for i, (k, _) in enumerate(settings.LABELS) if k is not None)
+            nav = _settings_nav_indices(expanded_sections)
+            settings_idx = nav[0] if nav else next(
+                i for i, (k, _) in enumerate(settings.LABELS) if k is not None)
             continue
         if show_settings:
-            nav_keys = [i for i, (k, _) in enumerate(settings.LABELS) if k is not None]
-            n_items = len(nav_keys)
+            nav = _settings_nav_indices(expanded_sections)
+            n_items = len(nav)
             if key == curses.KEY_UP:
-                cur = nav_keys.index(settings_idx) if settings_idx in nav_keys else 0
-                settings_idx = nav_keys[(cur - 1) % n_items]
+                cur = nav.index(settings_idx) if settings_idx in nav else 0
+                settings_idx = nav[(cur - 1) % n_items]
+                if settings.LABELS[settings_idx][0] is None:
+                    _settings_close_others(
+                        expanded_sections, settings.LABELS[settings_idx][1])
             elif key == curses.KEY_DOWN:
-                cur = nav_keys.index(settings_idx) if settings_idx in nav_keys else 0
-                settings_idx = nav_keys[(cur + 1) % n_items]
+                cur = nav.index(settings_idx) if settings_idx in nav else 0
+                settings_idx = nav[(cur + 1) % n_items]
+                if settings.LABELS[settings_idx][0] is None:
+                    _settings_close_others(
+                        expanded_sections, settings.LABELS[settings_idx][1])
             elif key in (" ", "\n", "\r"):
-                settings.toggle_radio(settings.LABELS[settings_idx][0])
-                if _setting_key_group(settings.LABELS[settings_idx][0]) == "theme":
-                    _apply_active_theme()
-                _apply_font_family()
+                k, label = settings.LABELS[settings_idx]
+                if k is None:
+                    if expanded_sections.get(label, False):
+                        expanded_sections[label] = False
+                    else:
+                        _settings_close_others(expanded_sections, label)
+                        expanded_sections[label] = True
+                else:
+                    settings.toggle_radio(k)
+                    if _setting_key_group(k) == "theme":
+                        _apply_active_theme()
+                    _apply_font_family()
             elif key in ("\x1b", "\x10", "q"):
                 show_settings = False
             continue
@@ -1248,8 +1372,11 @@ HELP_SECTIONS = [
     ]),
     ("SETTINGS (Ctrl-P panel)", [
         "Ctrl-P              open / close settings panel",
-        "Up / Down           navigate settings",
-        "Space               toggle selected setting",
+        "Up / Down           navigate settings (section headers too)",
+        "Space / Enter       toggle a setting, or expand/collapse a section",
+        "▸ / ▾               collapsed / expanded section header",
+        "click header        expand / collapse a section",
+        "click setting       select it (Space to toggle)",
         "q / Esc / Ctrl-P    close settings panel",
     ]),
     ("MOUSE", [
@@ -1436,36 +1563,17 @@ def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
         "\u2514" + "\u2500" * (inner_w - 2) + "\u2518")
 
 
-def _draw_settings_overlay(stdscr, selected_idx: int, panel_width: int) -> None:
-    """Draw settings as a left sidebar panel (same style as file tree)."""
+def _draw_settings_overlay(stdscr, selected_idx: int, panel_width: int,
+                           expanded: dict[str, bool]) -> None:
+    """Draw settings as a left sidebar panel (same style as file tree).
+
+    Each section is a dropdown: a header row that expands/collapses the
+    setting rows underneath it.
+    """
     height, width = stdscr.getmaxyx()
-    items = settings.LABELS
-
-    # Build display rows
-    display_rows = []
-    for lbl_idx, (key, label) in enumerate(items):
-        if key is None:
-            if label:
-                display_rows.append(("header", label))
-                display_rows.append(("separator",))
-            else:
-                display_rows.append(("gap",))
-        else:
-            on = settings.get(key)
-            display_rows.append(("item", key, label, on, lbl_idx))
-
-    # Scroll viewport: center on selected item
     draw_height = height - 1  # -1 for status bar
-    nav_indices = [i for i, r in enumerate(display_rows) if r[0] == "item"]
-    if nav_indices and selected_idx >= 0:
-        try:
-            sel_pos = nav_indices.index(selected_idx)
-        except ValueError:
-            sel_pos = 0
-    else:
-        sel_pos = 0
-    start_idx = max(0, sel_pos - draw_height // 2)
-    end_idx = min(len(display_rows), start_idx + draw_height)
+    rows, start_idx = _settings_display_layout(expanded, selected_idx,
+                                               draw_height)
 
     # Draw right border
     for row in range(height):
@@ -1475,11 +1583,15 @@ def _draw_settings_overlay(stdscr, selected_idx: int, panel_width: int) -> None:
             pass
 
     # Draw items
-    for i, row_idx in enumerate(range(start_idx, end_idx)):
-        row = display_rows[row_idx]
+    for i, row in enumerate(rows[start_idx:start_idx + draw_height]):
         if row[0] == "header":
-            display = row[1]
-            attr = curses.A_REVERSE
+            _, label, lbl_idx = row
+            collapsed = not expanded.get(label, False)
+            arrow = "\u25b8" if collapsed else "\u25be"
+            display = f" {arrow} {label}"
+            attr = curses.A_BOLD
+            if lbl_idx == selected_idx:
+                attr |= curses.A_REVERSE
         elif row[0] == "separator":
             display = "\u2550" * (panel_width - 1)
             attr = curses.A_DIM

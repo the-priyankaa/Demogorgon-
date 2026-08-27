@@ -588,5 +588,117 @@ class TestFontFamily(unittest.TestCase):
         self.assertEqual(fake.getvalue(), "")
 
 
+class TestSettingsDropdown(unittest.TestCase):
+    def setUp(self):
+        from stdedit import settings
+        self.settings = settings
+        settings._settings = dict(settings._DEFAULTS)
+
+    def test_all_collapsed_nav_is_only_headers(self):
+        from stdedit.tui import _settings_nav_indices
+        from stdedit import settings
+        headers = [i for i, (k, _) in enumerate(settings.LABELS)
+                   if k is None and settings.LABELS[i][1]]
+        self.assertEqual(_settings_nav_indices({}), headers)
+        self.assertEqual(len(headers), 3)  # AUTO-SAVE, THEME, FONT FAMILY
+
+    def test_expanded_section_shows_items(self):
+        from stdedit.tui import _settings_nav_indices
+        from stdedit import settings
+        theme_keys = set(settings._theme_keys)
+        nav = set(_settings_nav_indices({"THEME": True}))
+        self.assertGreater(len(nav), 10)  # headers + all 15 themes
+        for i, (k, _) in enumerate(settings.LABELS):
+            if k in theme_keys:
+                self.assertIn(i, nav, f"{k} should be listed")
+            elif k is not None:
+                self.assertNotIn(i, nav, f"{k} should be hidden")
+
+    def test_headers_always_navigable(self):
+        from stdedit.tui import _settings_nav_indices
+        nav = _settings_nav_indices({"AUTO-SAVE": True, "FONT FAMILY": True})
+        headers = {"AUTO-SAVE", "THEME", "FONT FAMILY"}
+        for i in nav:
+            if self.settings.LABELS[i][0] is None:
+                headers.discard(self.settings.LABELS[i][1])
+        self.assertEqual(headers, set())
+
+    def test_display_rows_all_collapsed(self):
+        from stdedit.tui import _settings_display_rows
+        rows = _settings_display_rows({})
+        kinds = [r[0] for r in rows]
+        self.assertEqual(kinds, ["header", "header", "header"])
+        for r in rows:
+            self.assertEqual(r[0], "header")
+
+    def test_display_rows_expanded_adds_items_and_separator(self):
+        from stdedit.tui import _settings_display_rows
+        rows = _settings_display_rows({"THEME": True})
+        kinds = [r[0] for r in rows]
+        self.assertEqual(kinds.count("header"), 3)
+        self.assertEqual(kinds.count("item"), len(self.settings._theme_keys))
+        self.assertEqual(kinds.count("separator"), 1)
+
+    def test_display_layout_selection_centered_expanded(self):
+        from stdedit.tui import _settings_display_rows
+        from stdedit.tui import _settings_display_layout
+        rows = _settings_display_rows({"THEME": True})
+        item_idx = next(r[4] for r in rows if r[0] == "item")
+        _, start = _settings_display_layout({"THEME": True}, item_idx, 10)
+        # The selected item is visible within the viewport.
+        sel_pos = next(i for i, r in enumerate(rows) if r[0] == "item" and r[4] == item_idx)
+        self.assertLessEqual(start, sel_pos)
+        self.assertLess(sel_pos - start, 10)
+
+
+class TestSettingsAccordion(unittest.TestCase):
+    def setUp(self):
+        from stdedit import settings
+        self.settings = settings
+        settings._settings = dict(settings._DEFAULTS)
+
+    def test_close_others_keeps_one(self):
+        from stdedit.tui import _settings_close_others
+        exp = {"AUTO-SAVE": True, "THEME": True, "FONT FAMILY": True}
+        _settings_close_others(exp, "THEME")
+        self.assertEqual(exp, {"AUTO-SAVE": False, "THEME": True, "FONT FAMILY": False})
+
+    def test_close_others_none_clears_all(self):
+        from stdedit.tui import _settings_close_others
+        exp = {"AUTO-SAVE": True, "THEME": True, "FONT FAMILY": True}
+        _settings_close_others(exp, None)
+        self.assertFalse(any(exp.values()))
+
+    def test_navigation_to_header_closes_previous(self):
+        """
+        With THEME expanded, navigating Down to the FONT FAMILY header must
+        collapse THEME (single-open accordion).
+        """
+        from stdedit.tui import _settings_nav_indices, _settings_close_others
+        from stdedit import settings
+        exp = {"THEME": True}
+        settings_idx = _settings_nav_indices(exp)[0]  # AUTO-SAVE header
+        for _ in range(30):
+            nav = _settings_nav_indices(exp)
+            cur = nav.index(settings_idx) if settings_idx in nav else 0
+            settings_idx = nav[(cur + 1) % len(nav)]
+            if settings.LABELS[settings_idx][0] is None:
+                _settings_close_others(exp, settings.LABELS[settings_idx][1])
+                if settings.LABELS[settings_idx][1] == "FONT FAMILY":
+                    break
+        self.assertEqual(settings.LABELS[settings_idx][1], "FONT FAMILY")
+        self.assertFalse(exp["THEME"])
+
+    def test_open_one_after_heading_to_another(self):
+        from stdedit.tui import _settings_close_others
+        exp = {}
+        _settings_close_others(exp, "THEME")
+        exp["THEME"] = True
+        _settings_close_others(exp, "FONT FAMILY")
+        exp["FONT FAMILY"] = True
+        self.assertEqual(exp["THEME"], False)
+        self.assertEqual(exp["FONT FAMILY"], True)
+
+
 if __name__ == "__main__":
     unittest.main()
