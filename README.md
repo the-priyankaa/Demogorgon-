@@ -1,6 +1,6 @@
 <!-- Update this file after every feature/keybind change -->
 
-# stdedit
+# YUKI
 
 Zero-dependency terminal text editor. Python stdlib only.
 
