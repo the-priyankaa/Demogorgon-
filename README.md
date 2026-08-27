@@ -13,6 +13,8 @@ Zero-dependency terminal text editor. Python stdlib only.
 
 ```bash
 git clone <repo-url> && cd "core(for git basic)"
+```
+```
 make install          # creates venv + symlinks to ~/.local/bin
 stdedit myfile.py     # or: yuki myfile.py
 ```
