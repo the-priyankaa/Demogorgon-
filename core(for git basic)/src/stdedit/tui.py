@@ -1640,6 +1640,10 @@ def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
                 msg = f" Searching...  ({len(qo.files)} files indexed)"
             elif qo.scan_error:
                 msg = f" Search error: {qo.scan_error}"
+            elif qo.capped:
+                msg = " Index capped (40k files) — type more specifically"
+            elif qo.scoring:
+                msg = " Updating results..."
             else:
                 direct = qo._direct_candidate()
                 msg = " Press Enter to open typed path" if direct else " No matches"

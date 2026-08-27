@@ -113,12 +113,55 @@ def fuzzy_search(query: str, files: List[str], limit: int = 20) -> List[Tuple[fl
     """Return up to *limit* ``(score, path)`` tuples sorted best-first."""
     if not query:
         return []
+    return _fuzzy_search_lowered(query, files, [p.lower() for p in files], limit)
 
+
+def _fuzzy_search_lowered(
+    query: str, files: Iterable[str], lowers: Iterable[str], limit: int = 20
+) -> List[Tuple[float, str]]:
+    """Score *files* reusing precomputed lowercase forms.
+
+    Identical scoring to :func:`fuzzy_search` but avoids re-lowercasing every
+    path on each keystroke, which dominates allocation and CPU cost.
+    """
+    if not query:
+        return []
+
+    q_lower = query.lower()
     scored: list[tuple[float, str]] = []
-    for path in files:
-        s = _fuzzy_score(query, path)
-        if s >= 0:
-            scored.append((s, path))
+    for path, full_lower in zip(files, lowers):
+        qi = 0
+        matches: list[int] = []
+        for i, ch in enumerate(full_lower):
+            if qi < len(q_lower) and ch == q_lower[qi]:
+                matches.append(i)
+                qi += 1
+        if qi < len(q_lower):
+            continue
+
+        score = 0.0
+        max_run = 1
+        cur_run = 1
+        for j in range(1, len(matches)):
+            if matches[j] == matches[j - 1] + 1:
+                cur_run += 1
+                max_run = max(max_run, cur_run)
+            else:
+                cur_run = 1
+        score += max_run * 10.0
+
+        span = matches[-1] - matches[0] + 1
+        score -= span * 0.5
+
+        basename_start = path.rfind(os.sep) + 1
+        if all(m >= basename_start for m in matches):
+            score += 20.0
+
+        if full_lower.startswith(q_lower, basename_start):
+            score += 30.0
+
+        score -= len(path) * 0.01
+        scored.append((score, path))
 
     scored.sort(key=lambda x: (-x[0], x[1]))
     return scored[:limit]
@@ -133,9 +176,15 @@ def get_recent_matches(query: str, limit: int = 5) -> List[Tuple[float, str]]:
 
 
 class QuickOpen:
-    """Responsive Quick Open overlay state with asynchronous indexing."""
+    """Responsive Quick Open overlay state with async indexing + scoring.
+
+    Both the file index build and the per-keystroke result scoring run on
+    background worker threads, so typing never blocks the TUI.  The index is
+    capped (:attr:`MAX_FILES`) so memory and worst-case recompute stay bounded.
+    """
 
     BATCH_SIZE = 256
+    MAX_FILES = 40_000
 
     def __init__(
         self,
@@ -153,91 +202,169 @@ class QuickOpen:
         self.show_recent_on_empty = show_recent_on_empty
         self.loading: bool = False
         self.scan_error: str | None = None
+        self.capped: bool = False
+        self.scoring: bool = False
+        self._lowers: list[str] = []
         self._scan_thread: threading.Thread | None = None
+        self._results_thread: threading.Thread | None = None
         self._scan_stop = threading.Event()
+        self._results_stop = threading.Event()
+        self._query_wake = threading.Event()
         self._generation = 0
+        self._query_dirty = False
+        self._files_version = 0
+        self._last_version = 0
         self._lock = threading.RLock()
 
-    def _refresh_results_locked(self) -> None:
-        if self.query:
-            self.results = fuzzy_search(self.query, self.files)
-            # Keep the current selection valid as results change in the
-            # background.  Never let a disappearing result create a bogus path.
-            self.selected_idx = min(self.selected_idx, max(0, len(self.results) - 1))
-        else:
-            self.results = []
-            self.selected_idx = 0
+    def _flush_scan_batch(self, batch: list[tuple[str, str]], generation: int,
+                          stop_event: threading.Event) -> None:
+        if not batch:
+            return
+        with self._lock:
+            if generation != self._generation or stop_event.is_set():
+                return
+            self.files.extend(p for p, _ in batch)
+            self._lowers.extend(l for _, l in batch)
+            self._files_version += 1
+            self._query_wake.set()
 
     def _scan_worker(self, stop_event: threading.Event, generation: int) -> None:
         try:
-            batch: list[str] = []
+            batch: list[tuple[str, str]] = []
+            count = 0
             for path in _iter_file_index(self.root_dir, self.exclude_roots):
                 if stop_event.is_set():
                     return
-                batch.append(path)
-                if len(batch) >= self.BATCH_SIZE:
+                if count >= self.MAX_FILES:
                     with self._lock:
-                        if generation != self._generation or stop_event.is_set():
-                            return
-                        self.files.extend(batch)
-                        self._refresh_results_locked()
+                        if generation == self._generation and not stop_event.is_set():
+                            self.capped = True
+                    break
+                batch.append((path, path.lower()))
+                count += 1
+                if len(batch) >= self.BATCH_SIZE:
+                    self._flush_scan_batch(batch, generation, stop_event)
                     batch.clear()
-            if batch:
-                with self._lock:
-                    if generation != self._generation or stop_event.is_set():
-                        return
-                    self.files.extend(batch)
-                    self.files.sort()
-                    self._refresh_results_locked()
+            self._flush_scan_batch(batch, generation, stop_event)
             with self._lock:
                 if generation == self._generation and not stop_event.is_set():
+                    pairs = sorted(zip(self.files, self._lowers))
+                    self.files = [p for p, _ in pairs]
+                    self._lowers = [l for _, l in pairs]
+                    self._files_version += 1
                     self.loading = False
+                    self._query_wake.set()
         except Exception as exc:  # defensive: search must never kill the TUI
             with self._lock:
                 if generation == self._generation and not stop_event.is_set():
                     self.scan_error = str(exc)
                     self.loading = False
 
+    def _results_worker(self, stop_event: threading.Event, generation: int) -> None:
+        while True:
+            with self._lock:
+                if generation != self._generation or stop_event.is_set():
+                    return
+                stale = self._query_dirty or (
+                    bool(self.query) and self._files_version != self._last_version
+                )
+                if not stale:
+                    self.scoring = False
+            if not stale:
+                if self._query_wake.wait(0.05):
+                    self._query_wake.clear()
+                continue
+
+            with self._lock:
+                self._query_wake.clear()
+                self._query_dirty = False
+                self.scoring = True
+                query = self.query
+                files = tuple(self.files)
+                lowers = tuple(self._lowers)
+                version = self._files_version
+            if query:
+                results = _fuzzy_search_lowered(query, files, lowers)
+            else:
+                results = []
+            with self._lock:
+                if (generation == self._generation and not stop_event.is_set()
+                        and self.query == query):
+                    self.results = results
+                    self.selected_idx = min(self.selected_idx, max(0, len(self.results) - 1))
+                    self._last_version = version
+                self.scoring = False
+
     def open(self, background_index: bool = True) -> None:
         """Show the overlay immediately; optionally index files in the background."""
         self._scan_stop.set()
+        self._results_stop.set()
         with self._lock:
             self._generation += 1
             generation = self._generation
             self.files = []
+            self._lowers = []
             self.query = ""
             self.results = []
             self.selected_idx = 0
             self.scan_error = None
+            self.capped = False
+            self.scoring = False
+            self._query_dirty = False
+            self._files_version = 0
+            self._last_version = 0
             self.visible = True
             self.loading = bool(background_index)
         self._scan_stop = threading.Event()
+        self._results_stop = threading.Event()
+        self._query_wake = threading.Event()
         if not background_index:
             return
-        stop_event = self._scan_stop
         self._scan_thread = threading.Thread(
             target=self._scan_worker,
-            args=(stop_event, generation),
+            args=(self._scan_stop, generation),
             name="stdedit-quick-open-index",
             daemon=True,
         )
+        self._results_thread = threading.Thread(
+            target=self._results_worker,
+            args=(self._results_stop, generation),
+            name="stdedit-quick-open-results",
+            daemon=True,
+        )
         self._scan_thread.start()
+        self._results_thread.start()
 
     def close(self) -> None:
-        """Hide the overlay and stop any outstanding scan."""
+        """Hide the overlay and stop any outstanding scan/rescore workers."""
         self._scan_stop.set()
+        self._results_stop.set()
+        self._query_wake.set()
+        for thread in (self._scan_thread, self._results_thread):
+            if thread is not None:
+                thread.join(timeout=0.5)
+        self._scan_thread = None
+        self._results_thread = None
         with self._lock:
             self.visible = False
             self.query = ""
             self.results = []
             self.selected_idx = 0
             self.loading = False
+            self.scoring = False
 
     def update_query(self, query: str) -> None:
-        """Re-score currently indexed files immediately."""
+        """Record a new query without blocking the caller.
+
+        The recompute happens on the results worker thread; typing therefore
+        never stalls the TUI even with a large index.
+        """
         with self._lock:
+            if self.query == query:
+                return
             self.query = query
-            self._refresh_results_locked()
+            self._query_dirty = True
+        self._query_wake.set()
 
     def move_selection(self, dy: int) -> None:
         """Move cursor up/down, clamped to results."""

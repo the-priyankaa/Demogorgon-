@@ -6,7 +6,7 @@ Zero-dependency terminal text editor. Python stdlib only.
 
 ![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue)
 ![Zero Deps](https://img.shields.io/badge/deps-zero-brightgreen)
-![Tests](https://img.shields.io/badge/tests-499-passing)
+![Tests](https://img.shields.io/badge/tests-503-passing)
 ![Version](https://img.shields.io/badge/version-0.1.0-orange)
 
 ## Quick Start
@@ -49,7 +49,7 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 - Welcome Dashboard (opens with no file/project): YUKI front panel with Find File, New File, Recent Files, Config, Restore Session and more
 - File Explorer (`Ctrl-E`): tree view, search, create, delete, rename, copy path
 - Source Control (`Ctrl-G`): stage, unstage, commit, push, pull, branch switch, stash
-- Quick Open (`Ctrl-O`): fuzzy file search — background indexing, home-directory search from the dashboard, recent-files fallback
+- Quick Open (`Ctrl-O`): fuzzy file search — background indexing **and** background result matching, home-directory search from the dashboard, recent-files fallback
 - Diff Viewer: scrollable unified diff with syntax colors
 - Settings (`Ctrl-P`): auto-save mode, theme, font family selection
 - Help (`Ctrl-H` / `F1`): scrollable keybinding reference
@@ -64,6 +64,17 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 **AI Completions** — Codeium inline ghost-text suggestions (opt-in via API key)
 
 **Extensions** — Plugin system with `setup(api)` / `register(api)` lifecycle, 3 search paths, isolated error handling
+
+**Performance**
+- Quick Open never blocks editing: the file index and the per-keystroke result
+  scoring both run on background worker threads, so typing stays smooth even
+  on huge search roots.
+- The index is bounded (`MAX_FILES` = 40 000) with lowercase forms cached at
+  scan time — no per-keystroke allocation or re-lowercasing. Home-directory
+  searches over the cap show `Index capped (40k files) — type more
+  specifically`.
+- Status hints show live progress: `Searching... (N files indexed)`,
+  `Updating results...`, `Press Enter to open typed path`.
 
 **Zero Dependencies** — Every import is Python stdlib. Verified by `make proof`.
 
@@ -320,7 +331,7 @@ def setup(api):
 | Command | Description |
 |---------|-------------|
 | `make run FILE=file.py` | Run the editor |
-| `make test` | Run all tests (499 tests) |
+| `make test` | Run all tests (503 tests) |
 | `make proof` | Verify zero dependencies |
 | `make clean` | Remove `__pycache__` and artifacts |
 
@@ -354,7 +365,7 @@ src/stdedit/
 ├── install.py           'carl' installer (venv + symlinks)
 ├── perf.py              RSS memory + frame timing
 ├── dashboard.py         YUKI welcome dashboard (front panel)
-├── quick_open.py        Fuzzy file search (async, background index)
+├── quick_open.py        Fuzzy file search (async index + scoring, capped)
 ├── recent.py            Recently opened files (JSON)
 ├── settings.py          Persistent editor settings (JSON)
 ├── themes.py            Color themes (syntax, git, diff palettes)
