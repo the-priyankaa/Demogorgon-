@@ -48,6 +48,7 @@ from . import recent
 from . import completion
 from . import dashboard
 from . import themes
+from . import imageviewer
 
 _COLOR_PAIRS = {
     "keyword": 1,
@@ -185,6 +186,117 @@ class EditorContext:
         self.stdscr = stdscr
         self.status = ""
         self.quit_requested = False
+
+
+def _draw_centered_message(stdscr, line: str, height: int, width: int,
+                           y: int = None) -> None:
+    if y is None:
+        y = max(0, height // 2)
+    x = max(0, (width - len(line)) // 2)
+    try:
+        stdscr.addstr(y, x, line[: width - x])
+    except curses.error:
+        pass
+
+
+def _image_viewer_frame(stdscr, buf: Buffer, st: dict) -> Optional[str]:
+    """Render and drive one frame of the integrated image viewer.
+
+    Returns 'quit', 'exit', or None (keep viewing).
+    """
+    height, width = stdscr.getmaxyx()
+    cell_w = width
+    cell_h = max(1, height - 1)
+    fmt = buf.image_format or "unknown"
+    path = buf.image_path
+    st["path"] = path
+
+    if st.get("error") is None and not st.get("decoded"):
+        st["decoded"] = True
+        try:
+            if path and fmt in imageviewer.DECODERS:
+                with open(path, "rb") as fh:
+                    data = fh.read()
+                st["width"], st["height"], st["pixels"] = imageviewer.decode_image(
+                    fmt, data)
+            elif fmt not in imageviewer.DECODERS:
+                st["error"] = (f"{fmt} has no stdlib decoder — "
+                               "press v for fullscreen passthrough")
+            else:
+                st["error"] = "image file could not be read"
+        except Exception as exc:  # noqa: BLE001
+            st["error"] = f"decode failed: {exc} (v: passthrough)"
+
+    if st.get("pixels") is not None:
+        base = imageviewer.fit_scale(st["width"], st["height"], cell_w, cell_h)
+        if st.get("fit", True):
+            st["zoom"] = 1.0
+        scale = base * st.get("zoom", 1.0)
+        cells = imageviewer.build_cells(
+            st["width"], st["height"], st["pixels"],
+            cell_w, cell_h, scale,
+            st.get("pan_x", 0), st.get("pan_y", 0),
+        )
+        imageviewer.draw(stdscr, cells, cell_w, cell_h,
+                         imageviewer.make_pairs_state(), 0, 0,
+                         background=(8, 10, 14))
+        title = imageviewer.image_status_text(
+            path, st["width"], st["height"], fmt,
+            round(scale * 100), "render")
+    else:
+        stdscr.erase()
+        _draw_centered_message(stdscr, st.get("error", "no image"), height, width)
+        title = imageviewer.image_status_text(path, 0, 0, fmt, 0, "viewer")
+
+    hint = imageviewer.viewer_hints(fmt)
+    base = imageviewer.fit_scale(st.get("width", 0), st.get("height", 0),
+                                 cell_w, cell_h)
+    try:
+        stdscr.addstr(height - 1, 0, title[: width - 1].ljust(width - 1),
+                      curses.A_REVERSE)
+        if base <= 0:
+            stdscr.addstr(height - 2, 0, hint[: width - 1], curses.A_DIM)
+    except curses.error:
+        pass
+    stdscr.refresh()
+
+    key = _get_key(stdscr)
+    if key in ("q", "\x1b", "\x1c"):  # exit / Esc / Ctrl-\ toggle
+        return "exit"
+    if key == "\x11":  # Ctrl-Q
+        return "quit"
+    if key in ("v", "V"):
+        imageviewer.stream_fullscreen(stdscr, path, fmt)
+        return None
+    if st.get("pixels") is None:
+        return None
+
+    if key in ("+", "="):
+        st["zoom"] = min(64.0, st.get("zoom", 1.0) * 1.25)
+        st["fit"] = False
+    elif key in ("-", "_"):
+        st["zoom"] = max(0.05, st.get("zoom", 1.0) / 1.25)
+        st["fit"] = False
+    elif key in ("r", "R") or key == curses.KEY_HOME:
+        st["zoom"], st["pan_x"], st["pan_y"], st["fit"] = 1.0, 0, 0, True
+    elif key == curses.KEY_END:
+        if base > 0:
+            st["zoom"] = 1.0 / base
+            st["fit"] = False
+            st["pan_x"], st["pan_y"] = 0, 0
+    elif key == curses.KEY_UP:
+        st["pan_y"] = max(0, st.get("pan_y", 0) - 6)
+    elif key == curses.KEY_DOWN:
+        st["pan_y"] = st.get("pan_y", 0) + 6
+    elif key == curses.KEY_LEFT:
+        st["pan_x"] = max(0, st.get("pan_x", 0) - 6)
+    elif key == curses.KEY_RIGHT:
+        st["pan_x"] = st.get("pan_x", 0) + 6
+    elif key == curses.KEY_PPAGE:
+        st["pan_y"] = max(0, st.get("pan_y", 0) - 24)
+    elif key == curses.KEY_NPAGE:
+        st["pan_y"] = st.get("pan_y", 0) + 24
+    return None
 
 
 def run(buf: Buffer, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
@@ -348,6 +460,13 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     _git_refresh_time = 0.0
     _git_refresh_interval = 2.0  # seconds between git status refreshes
     dashboard_active = (buf.filename is None and project_dir is None)
+    image_view_active = buf.image_format is not None
+    image_state = {
+        "pixels": None, "width": 0, "height": 0,
+        "error": None, "decoded": False,
+        "zoom": 1.0, "pan_x": 0, "pan_y": 0,
+        "path": buf.image_path,
+    }
     search_root = os.path.expanduser("~") if dashboard_active else root_dir
     package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     excluded_search_roots = [package_root] if dashboard_active else []
@@ -429,6 +548,21 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             if key in ("g", "G"):
                 status = "Find Text operates on the current file; open a file first"
                 continue
+            continue
+        if buf.image_format is not None and image_view_active:
+            meter.frame_end(frame_started)
+            action = _image_viewer_frame(stdscr, buf, image_state)
+            if action == "quit":
+                return
+            if action == "exit":
+                image_view_active = False
+                status = "Raw binary view — Ctrl-\\ re-opens the image viewer"
+            continue
+        if (buf.image_format is not None
+                and image_state.get("path") != buf.image_path):
+            image_state["path"] = buf.image_path
+            image_view_active = True
+            status = "Image opened — viewer active"
             continue
         stdscr.erase()
         height, width = stdscr.getmaxyx()
@@ -703,6 +837,13 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                                            view_h)
             elif key in ("q", "\x1b", "\n", "\r"):
                 show_help = False
+            continue
+
+        # Image viewer toggle: current file is an image (Ctrl-\)
+        if key in ("\x1c",) and buf.image_path is not None:
+            image_view_active = not image_view_active
+            status = ("Image viewer on" if image_view_active
+                      else "Raw binary view")
             continue
 
         # Settings overlay (Ctrl-P).

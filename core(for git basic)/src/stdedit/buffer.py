@@ -17,6 +17,7 @@ from .storage.compact import CompactLines
 from .storage.mapped import MappedLines
 from .undo import UndoManager
 from .clipboard import sys_copy, sys_paste
+from .imageviewer import detect_format_path
 
 DEFAULT_LARGE_FILE_BYTES = 8 * 1024 * 1024
 BRACKET_PAIRS = {"(": ")", "[": "]", "{": "}"}
@@ -50,6 +51,8 @@ class Buffer:
         self._content_chars = 0
         self.encoding = "utf-8"
         self.newline = "\n"
+        self.image_format: Optional[str] = None
+        self.image_path: Optional[str] = None
 
         self.undo_mgr = UndoManager()
         self._last_action: Optional[str] = None
@@ -138,8 +141,30 @@ class Buffer:
         return encoding, bom_len, newline, size
 
     def load(self, path: str) -> None:
+        self.image_format = None
+        self.image_path = None
         file_size = os.path.getsize(path)
         is_large = bool(self.large_file_threshold and file_size >= self.large_file_threshold)
+
+        fmt = detect_format_path(path)
+        if fmt is not None:
+            # Binary image file: keep the buffer inert (single placeholder
+            # line) and let the TUI switch it into the integrated viewer.
+            self.filename = path
+            self.encoding = "latin-1"
+            self.newline = "\n"
+            self._lines = ["  <binary image — integrated viewer active (q: raw view  Ctrl-\\: reopen viewer)>"]
+            self._content_chars = len(self._lines[0])
+            self.cursor_x = 0
+            self.cursor_y = 0
+            self.selection_anchor = None
+            self.modified = False
+            self.undo_mgr = UndoManager()
+            self._last_action = None
+            self.large_file_mode = False
+            self.image_format = fmt
+            self.image_path = path
+            return
 
         if is_large:
             encoding, bom_len, newline, _ = self._detect_streamed_encoding(path)

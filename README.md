@@ -6,7 +6,7 @@ Zero-dependency terminal text editor. Python stdlib only.
 
 ![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue)
 ![Zero Deps](https://img.shields.io/badge/deps-zero-brightgreen)
-![Tests](https://img.shields.io/badge/tests-503-passing)
+![Tests](https://img.shields.io/badge/tests-524-passing)
 ![Version](https://img.shields.io/badge/version-0.1.0-orange)
 
 ## Quick Start
@@ -51,6 +51,7 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 - Source Control (`Ctrl-G`): stage, unstage, commit, push, pull, branch switch, stash
 - Quick Open (`Ctrl-O`): fuzzy file search — background indexing **and** background result matching, home-directory search from the dashboard, recent-files fallback
 - Diff Viewer: scrollable unified diff with syntax colors
+- Image Viewer: opens automatically when you open an image file — PNG / BMP / PPM render in-terminal via half-block truecolor (any 256-color terminal); JPEG / GIF / WebP / HEIC / SVG and more stream full-screen through the Kitty / iTerm2 inline-graphics protocol (raw bytes, terminal-native decoding)
 - Settings (`Ctrl-P`): auto-save mode, theme, font family selection
 - Help (`Ctrl-H` / `F1`): scrollable keybinding reference
 
@@ -118,6 +119,23 @@ Ctrl-O              quick open — fuzzy file search
 Ctrl-Q              quit (opens a confirmation dialog:
                     Enter/Space confirm the focused button,
                     s/d/q save / discard / cancel shortcuts)
+```
+
+### Image Viewer
+
+```
+auto                opening an image file shows the viewer immediately
+                    (q exits to the raw byte buffer; Ctrl-\ toggles back)
+q / Esc             leave the viewer (edit / inspect raw bytes)
++ / -               zoom in / zoom out
+Arrow keys          pan the image
+PageUp / PageDown   pan up / down in larger steps
+r                   reset zoom + pan
+Home                fit the whole image
+End                 100% zoom
+v                   full-screen passthrough stream (any format) — the
+                    terminal's own decoder renders the raw file, Enter returns
+Ctrl-Q              quit the editor
 ```
 
 ### File Tree (Ctrl-E panel)
@@ -331,7 +349,7 @@ def setup(api):
 | Command | Description |
 |---------|-------------|
 | `make run FILE=file.py` | Run the editor |
-| `make test` | Run all tests (503 tests) |
+| `make test` | Run all tests (524 tests) |
 | `make proof` | Verify zero dependencies |
 | `make clean` | Remove `__pycache__` and artifacts |
 
@@ -365,6 +383,8 @@ src/stdedit/
 ├── install.py           'carl' installer (venv + symlinks)
 ├── perf.py              RSS memory + frame timing
 ├── dashboard.py         YUKI welcome dashboard (front panel)
+├── imageviewer.py       In-terminal image viewer (pure decoders + half-block render +
+│                        Kitty/iTerm2 graphics passthrough)
 ├── quick_open.py        Fuzzy file search (async index + scoring, capped)
 ├── recent.py            Recently opened files (JSON)
 ├── settings.py          Persistent editor settings (JSON)
