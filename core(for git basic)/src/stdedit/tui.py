@@ -46,6 +46,7 @@ from .diff_viewer import DiffViewer, init_diff_colors, draw_diff_overlay, diff_v
 from .quick_open import QuickOpen
 from . import recent
 from . import completion
+from . import themes
 
 _COLOR_PAIRS = {
     "keyword": 1,
@@ -77,6 +78,20 @@ def _apply_font_family() -> None:
         pass
 
 
+def _apply_active_theme() -> None:
+    """Re-apply the active theme to every color pair."""
+    themes.apply_theme(settings.get_active_theme_name() or "default")
+
+
+def _setting_key_group(key: str) -> str | None:
+    """Return the radio-group name a setting key belongs to (or None)."""
+    groups = settings.RADIO_GROUPS
+    for gname, gkeys in groups.items():
+        if key in gkeys:
+            return gname
+    return None
+
+
 class EditorContext:
     """Small extension-facing editor context shared with the core TUI."""
     def __init__(self, buf: Buffer, stdscr=None):
@@ -96,16 +111,8 @@ def _init_colors() -> None:
         return
     curses.start_color()
     curses.use_default_colors()
-    curses.init_pair(_COLOR_PAIRS["keyword"], curses.COLOR_MAGENTA, -1)
-    curses.init_pair(_COLOR_PAIRS["string"], curses.COLOR_GREEN, -1)
-    curses.init_pair(_COLOR_PAIRS["comment"], curses.COLOR_CYAN, -1)
-    curses.init_pair(_COLOR_PAIRS["number"], curses.COLOR_YELLOW, -1)
-    curses.init_pair(_COLOR_PAIRS["function"], curses.COLOR_BLUE, -1)
-    curses.init_pair(_COLOR_PAIRS["type"], curses.COLOR_YELLOW, -1)
-    curses.init_pair(_COLOR_PAIRS["operator"], curses.COLOR_RED, -1)
-    curses.init_pair(_COLOR_PAIRS["tag"], curses.COLOR_MAGENTA, -1)
-    curses.init_pair(_COLOR_PAIRS["attribute"], curses.COLOR_CYAN, -1)
-    curses.init_pair(_COLOR_PAIRS["property"], curses.COLOR_BLUE, -1)
+    active = settings.get_active_theme_name() or "default"
+    themes.apply_theme(active)
 
 
 def _enable_bracketed_paste() -> None:
@@ -524,6 +531,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 settings_idx = nav_keys[(cur + 1) % n_items]
             elif key in (" ", "\n", "\r"):
                 settings.toggle_radio(settings.LABELS[settings_idx][0])
+                if _setting_key_group(settings.LABELS[settings_idx][0]) == "theme":
+                    _apply_active_theme()
                 _apply_font_family()
             elif key in ("\x1b", "\x10", "q"):
                 show_settings = False

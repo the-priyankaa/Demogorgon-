@@ -298,5 +298,53 @@ class TestFontFamily(unittest.TestCase):
         self.assertIn("FONT FAMILY", section_headers)
 
 
+class TestTheme(unittest.TestCase):
+    def setUp(self):
+        for tk in settings._theme_keys:
+            settings.set(tk, False)
+        settings.set(settings._theme_keys[0], True)
+
+    def test_first_theme_is_default(self):
+        self.assertIn("default", settings.themes.THEME_ORDER)
+        first_key = settings._theme_keys[0]
+        self.assertTrue(settings.get(first_key))
+
+    def test_other_themes_are_off(self):
+        for tk in settings._theme_keys[1:]:
+            self.assertFalse(settings.get(tk), f"{tk} should be off by default")
+
+    def test_theme_radio_group(self):
+        second_key = settings._theme_keys[1]
+        settings.toggle_radio(second_key)
+        self.assertTrue(settings.get(second_key))
+        self.assertFalse(settings.get(settings._theme_keys[0]))
+
+    def test_theme_switch(self):
+        k1 = settings._theme_keys[1]
+        k2 = settings._theme_keys[2]
+        settings.toggle_radio(k1)
+        self.assertTrue(settings.get(k1))
+        settings.toggle_radio(k2)
+        self.assertTrue(settings.get(k2))
+        self.assertFalse(settings.get(k1))
+
+    def test_get_active_theme_name(self):
+        name = settings.get_active_theme_name()
+        self.assertIn(name, settings.themes.theme_names())
+
+    def test_get_active_theme_key(self):
+        key = settings.get_active_theme_key()
+        self.assertIn(key, settings._theme_keys)
+
+    def test_labels_contain_theme_section(self):
+        section_headers = [label for key, label in settings.LABELS if key is None]
+        self.assertIn("THEME", section_headers)
+
+    def test_theme_section_before_font(self):
+        idx_theme = [i for i, (k, _) in enumerate(settings.LABELS) if k is None and _ == "THEME"][0]
+        idx_font = [i for i, (k, _) in enumerate(settings.LABELS) if k is None and _ == "FONT FAMILY"][0]
+        self.assertLess(idx_theme, idx_font)
+
+
 if __name__ == "__main__":
     unittest.main()

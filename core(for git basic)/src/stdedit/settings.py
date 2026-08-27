@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 
 from . import font_detect
+from . import themes
 
 CONFIG_DIR = Path.home() / ".config" / "stdedit"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
@@ -23,7 +24,10 @@ _AUTO_SAVE_KEYS = ["auto_save_off", "auto_save_idle", "auto_save_periodic", "aut
 # --- Font family keys (dynamic from system) ---
 _font_keys, _font_labels = font_detect.font_keys_and_labels()
 
-# Build _DEFAULTS: auto-save + first font ON
+# --- Theme keys (dynamic from built-in themes) ---
+_theme_keys, _theme_labels = themes.theme_keys(), themes.theme_names()
+
+# Build _DEFAULTS: auto-save + first font ON + default theme ON
 _DEFAULTS: dict[str, bool] = {
     "auto_save_off": True,
     "auto_save_idle": False,
@@ -32,6 +36,8 @@ _DEFAULTS: dict[str, bool] = {
 }
 for i, fk in enumerate(_font_keys):
     _DEFAULTS[fk] = (i == 0)
+for i, tk in enumerate(_theme_keys):
+    _DEFAULTS[tk] = (i == 0)
 
 # Build LABELS
 LABELS: list[tuple[str | None, str]] = [
@@ -41,14 +47,19 @@ LABELS: list[tuple[str | None, str]] = [
     ("auto_save_periodic", "Auto-save: every 30s"),
     ("auto_save_on_edit", "Auto-save: on every edit"),
     (None, ""),
-    (None, "FONT FAMILY"),
+    (None, "THEME"),
 ]
+for tk, tl in zip(_theme_keys, _theme_labels):
+    LABELS.append((tk, tl))
+LABELS.append((None, ""))
+LABELS.append((None, "FONT FAMILY"))
 for fk, fl in zip(_font_keys, _font_labels):
     LABELS.append((fk, fl))
 
 # Build RADIO_GROUPS
 RADIO_GROUPS: dict[str, list[str]] = {
     "auto_save": list(_AUTO_SAVE_KEYS),
+    "theme": list(_theme_keys),
     "font_family": list(_font_keys),
 }
 
@@ -60,6 +71,9 @@ for _gname, _gkeys in RADIO_GROUPS.items():
 
 # Build reverse lookup: key -> display name
 _KEY_TO_FONT_NAME: dict[str, str] = dict(zip(_font_keys, _font_labels))
+
+# Build reverse lookup: theme key -> display name
+_KEY_TO_THEME_NAME: dict[str, str] = dict(zip(_theme_keys, _theme_labels))
 
 _settings: dict[str, bool] = dict(_DEFAULTS)
 
@@ -157,6 +171,22 @@ def get_active_font_key() -> str | None:
     for fk in _font_keys:
         if _settings.get(fk):
             return fk
+    return None
+
+
+def get_active_theme_name() -> str | None:
+    """Return the display name of the currently selected theme, or None."""
+    for tk in _theme_keys:
+        if _settings.get(tk):
+            return _KEY_TO_THEME_NAME.get(tk)
+    return None
+
+
+def get_active_theme_key() -> str | None:
+    """Return the settings key of the currently selected theme, or None."""
+    for tk in _theme_keys:
+        if _settings.get(tk):
+            return tk
     return None
 
 

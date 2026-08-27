@@ -19,6 +19,23 @@ def init_diff_colors() -> None:
     """Register color pairs for the diff viewer."""
     if not curses.has_colors():
         return
+    try:
+        from . import settings
+        from . import themes
+        name = settings.get_active_theme_name()
+        if name:
+            diff = themes.THEMES[themes.resolve_theme_id(name)].get("diff", {})
+            fg, bg = themes._resolve(*diff.get("add", (2, -1)))
+            curses.init_pair(_PAIR_DIFF_ADD, fg, bg)
+            fg, bg = themes._resolve(*diff.get("del", (1, -1)))
+            curses.init_pair(_PAIR_DIFF_DEL, fg, bg)
+            fg, bg = themes._resolve(*diff.get("hunk", (6, -1)))
+            curses.init_pair(_PAIR_DIFF_HUNK, fg, bg)
+            fg, bg = themes._resolve(*diff.get("header", (3, -1)))
+            curses.init_pair(_PAIR_DIFF_HDR, fg, bg)
+            return
+    except Exception:
+        pass
     curses.init_pair(_PAIR_DIFF_ADD, curses.COLOR_GREEN, -1)
     curses.init_pair(_PAIR_DIFF_DEL, curses.COLOR_RED, -1)
     curses.init_pair(_PAIR_DIFF_HUNK, curses.COLOR_CYAN, -1)

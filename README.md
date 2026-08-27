@@ -6,7 +6,7 @@ Zero-dependency terminal text editor. Python stdlib only.
 
 ![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue)
 ![Zero Deps](https://img.shields.io/badge/deps-zero-brightgreen)
-![Tests](https://img.shields.io/badge/tests-440-passing)
+![Tests](https://img.shields.io/badge/tests-465-passing)
 ![Version](https://img.shields.io/badge/version-0.1.0-orange)
 
 ## Quick Start
@@ -43,12 +43,14 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 
 **Syntax Highlighting** — 17 languages: Python, JavaScript, TypeScript, HTML, CSS, C, C++, Java, Rust, Go, JSON, YAML, Markdown, Shell, SQL, XML, plaintext
 
+**Themes** — 7 built-in color themes: default, Monokai, Dracula, Solarized Dark, Solarized Light, Nord, One Dark
+
 **Panels & Overlays**
 - File Explorer (`Ctrl-E`): tree view, search, create, delete, rename, copy path
 - Source Control (`Ctrl-G`): stage, unstage, commit, push, pull, branch switch, stash
 - Quick Open (`Ctrl-O`): fuzzy file search
 - Diff Viewer: scrollable unified diff with syntax colors
-- Settings (`Ctrl-P`): auto-save mode, font family selection
+- Settings (`Ctrl-P`): auto-save mode, theme, font family selection
 - Help (`Ctrl-H` / `F1`): scrollable keybinding reference
 
 **Git & GitHub**
@@ -183,6 +185,7 @@ Up / Down           navigate settings
 Space               toggle selected setting
 q / Esc / Ctrl-P    close settings panel
 ```
+`auto-save`, `theme`, and `font family` are radio groups — `Space` on any option activates it and turns the others off.
 
 ### Mouse
 
@@ -249,10 +252,12 @@ make deps-fix       # auto-install missing helpers via detected package manager
 
 | File | Purpose |
 |------|---------|
-| `~/.config/stdedit/settings.json` | Editor settings (auto-save mode, font family) |
+| `~/.config/stdedit/settings.json` | Editor settings (auto-save, theme, font family) |
 | `~/.config/stdedit/recent.json` | Recently opened files (max 50) |
 
 **Auto-save modes:** off (default), on idle (5s), periodic (30s), on every edit
+
+**Themes:** default, Monokai, Dracula, Solarized Dark, Solarized Light, Nord, One Dark. On 256-color terminals each theme uses its true palette; fewer colors fold tones to the closest base color.
 
 **Font family:** Detects installed monospace fonts via `fc-list` and tries to switch terminal font via OSC 50 escape sequences (works in xterm, Konsole, iTerm2; best-effort in other terminals).
 
@@ -304,7 +309,7 @@ def setup(api):
 | Command | Description |
 |---------|-------------|
 | `make run FILE=file.py` | Run the editor |
-| `make test` | Run all tests (440 tests) |
+| `make test` | Run all tests (465 tests) |
 | `make proof` | Verify zero dependencies |
 | `make clean` | Remove `__pycache__` and artifacts |
 
@@ -340,6 +345,7 @@ src/stdedit/
 ├── quick_open.py        Fuzzy file search
 ├── recent.py            Recently opened files (JSON)
 ├── settings.py          Persistent editor settings (JSON)
+├── themes.py            Color themes (syntax, git, diff palettes)
 ├── languages/
 │   └── schema.py        Regex tokenizer + language detection (17 languages)
 ├── extensions/

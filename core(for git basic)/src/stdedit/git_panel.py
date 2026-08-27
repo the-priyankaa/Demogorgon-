@@ -327,6 +327,21 @@ def init_panel_colors() -> None:
     """Register color pairs for the git panel."""
     if not curses.has_colors():
         return
+    try:
+        from . import settings
+        from . import themes
+        name = settings.get_active_theme_name()
+        if name:
+            git = themes.THEMES[themes.resolve_theme_id(name)].get("git", {})
+            fg, bg = themes._resolve(*git.get("staged", (3, -1)))
+            curses.init_pair(_PAIR_STAGED, fg, bg)
+            fg, bg = themes._resolve(*git.get("unstaged", (7, -1)))
+            curses.init_pair(_PAIR_UNSTAGED, fg, bg)
+            fg, bg = themes._resolve(*git.get("header", (6, -1)))
+            curses.init_pair(_PAIR_HEADER, fg, bg)
+            return
+    except Exception:
+        pass
     curses.init_pair(_PAIR_STAGED, curses.COLOR_YELLOW, -1)
     curses.init_pair(_PAIR_UNSTAGED, curses.COLOR_WHITE, -1)
     curses.init_pair(_PAIR_HEADER, curses.COLOR_CYAN, -1)
@@ -511,14 +526,19 @@ def draw_git_panel(stdscr, panel: GitPanel, height: int, width: int,
     unstaged = [f for f in panel.items if not f.staged]
 
     def _status_color(status: str) -> int:
-        """Return curses color pair number for a status char."""
-        _colors = {
-            "M": curses.COLOR_YELLOW, "A": curses.COLOR_GREEN,
-            "D": curses.COLOR_RED, "?": curses.COLOR_WHITE,
-            "R": curses.COLOR_CYAN, "C": curses.COLOR_CYAN,
-            "U": curses.COLOR_RED,
-        }
-        c = _colors.get(status, curses.COLOR_WHITE)
+        """Return curses color index for a status char (theme-aware)."""
+        c = _STATUS_COLORS.get(status, curses.COLOR_WHITE)
+        try:
+            from . import settings
+            from . import themes
+            name = settings.get_active_theme_name()
+            if name:
+                c = themes.git_color(name, status)
+            if getattr(curses, "COLORS", 256) < 256 and c >= 16:
+                from .themes import _16_COLOR_MAP
+                c = _16_COLOR_MAP.get(c, curses.COLOR_WHITE)
+        except Exception:
+            pass
         return c
 
     def _draw_section(label: str, count: int, can_stage_all: bool = False,
