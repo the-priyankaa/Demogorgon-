@@ -15,7 +15,7 @@ Zero-dependency terminal text editor. Python stdlib only.
 git clone https://github.com/the-priyankaa/Demogorgon-.git
 ```
 ```
-cd "core(for git basic)"
+cd core
 ```
 ```
 make install          # creates venv + symlinks to ~/.local/bin
