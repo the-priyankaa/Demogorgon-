@@ -12,7 +12,7 @@ Zero-dependency terminal text editor. Python stdlib only.
 ## Quick Start
 
 ```bash
-git clone <repo-url> && cd "core(for git basic)"
+git clone https://github.com/the-priyankaa/Demogorgon-.git && cd "core(for git basic)"
 ```
 ```
 make install          # creates venv + symlinks to ~/.local/bin
