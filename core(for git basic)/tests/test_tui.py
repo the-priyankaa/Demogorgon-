@@ -700,5 +700,107 @@ class TestSettingsAccordion(unittest.TestCase):
         self.assertEqual(exp["FONT FAMILY"], True)
 
 
+class TestQuitDialog(unittest.TestCase):
+    def test_choices_unmodified(self):
+        from stdedit.tui import _quit_dialog_choices
+        self.assertEqual(_quit_dialog_choices(False, True),
+                         [("Quit", "quit"), ("Cancel", "cancel")])
+        self.assertEqual(_quit_dialog_choices(False, False),
+                         [("Quit", "quit"), ("Cancel", "cancel")])
+
+    def test_choices_modified_with_save(self):
+        from stdedit.tui import _quit_dialog_choices
+        self.assertEqual(_quit_dialog_choices(True, True),
+                         [("Save & Quit", "save"), ("Discard & Quit", "discard"),
+                          ("Cancel", "cancel")])
+
+    def test_choices_modified_no_save(self):
+        from stdedit.tui import _quit_dialog_choices
+        self.assertEqual(_quit_dialog_choices(True, False),
+                         [("Discard & Quit", "discard"), ("Cancel", "cancel")])
+
+    def test_step_navigation_wraps(self):
+        from stdedit.tui import _quit_dialog_choices, _quit_dialog_step
+        choices = _quit_dialog_choices(True, True)
+        sel, action = _quit_dialog_step(curses.KEY_LEFT, 0, choices)
+        self.assertEqual(sel, len(choices) - 1)
+        self.assertIsNone(action)
+        sel, action = _quit_dialog_step(curses.KEY_RIGHT, len(choices) - 1, choices)
+        self.assertEqual(sel, 0)
+        self.assertIsNone(action)
+
+    def test_step_enter_activates_focused(self):
+        from stdedit.tui import _quit_dialog_choices, _quit_dialog_step
+        choices = _quit_dialog_choices(True, True)
+        self.assertEqual(_quit_dialog_step("\n", 1, choices)[1], "discard")
+        self.assertEqual(_quit_dialog_step(" ", len(choices) - 1, choices)[1], "cancel")
+
+    def test_step_shortcuts(self):
+        from stdedit.tui import _quit_dialog_choices, _quit_dialog_step
+        choices = _quit_dialog_choices(True, True)
+        self.assertEqual(_quit_dialog_step("s", 0, choices)[1], "save")
+        self.assertEqual(_quit_dialog_step("d", 0, choices)[1], "discard")
+        self.assertEqual(_quit_dialog_step("q", 0, choices)[1], "discard")
+        self.assertEqual(_quit_dialog_step("\x1b", 0, choices)[1], "cancel")
+
+    def test_confirm_dialog_default_is_cancel(self):
+        from stdedit.tui import _confirm_quit_dialog
+        keys = iter(["\n"])
+        result = _confirm_quit_dialog(lambda: next(keys), lambda c, s: None,
+                                      True, True)
+        self.assertEqual(result, "cancel")
+
+    def test_confirm_dialog_quit_shortcut(self):
+        from stdedit.tui import _confirm_quit_dialog
+        keys = iter(["q"])
+        result = _confirm_quit_dialog(lambda: next(keys), lambda c, s: None,
+                                      False, True)
+        self.assertEqual(result, "quit")
+
+    def test_confirm_dialog_save_shortcut(self):
+        from stdedit.tui import _confirm_quit_dialog
+        keys = iter(["s"])
+        result = _confirm_quit_dialog(lambda: next(keys), lambda c, s: None,
+                                      True, True)
+        self.assertEqual(result, "save")
+
+    def test_confirm_dialog_esc_cancels(self):
+        from stdedit.tui import _confirm_quit_dialog
+        keys = iter(["\x1b"])
+        result = _confirm_quit_dialog(lambda: next(keys), lambda c, s: None,
+                                      True, False)
+        self.assertEqual(result, "cancel")
+
+    def test_confirm_dialog_select_then_enter(self):
+        from stdedit.tui import _confirm_quit_dialog
+        keys = iter([curses.KEY_LEFT, "\n"])
+        result = _confirm_quit_dialog(lambda: next(keys), lambda c, s: None,
+                                      False, True)
+        self.assertEqual(result, "quit")
+
+    def test_draw_quit_dialog_no_error(self):
+        from stdedit.tui import _draw_quit_dialog, _quit_dialog_choices
+
+        class FakeScr:
+            def __init__(self):
+                self.calls = []
+
+            def getmaxyx(self):
+                return (24, 80)
+
+            def addstr(self, row, col, text, attr):
+                self.calls.append((row, col, text))
+
+        s = FakeScr()
+        choices = _quit_dialog_choices(True, True)
+        _draw_quit_dialog(s, "Quit stdedit?", ["Unsaved."], choices, 1)
+        joined = "".join(t for _, _, t in s.calls)
+        self.assertIn("[ Save & Quit ]", joined)
+        self.assertIn("[ Discard & Quit ]", joined)
+        self.assertIn("[ Cancel ]", joined)
+        self.assertIn("\u250c", joined)
+        self.assertIn("\u2518", joined)
+
+
 if __name__ == "__main__":
     unittest.main()

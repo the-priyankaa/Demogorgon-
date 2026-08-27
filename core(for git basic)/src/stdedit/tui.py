@@ -1012,16 +1012,25 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                                           explorer_width=explorer_width)
             if result:
                 status = result
-        elif key == "\x11":  # Ctrl-Q
-            if buf.modified and not settings.any_auto_save():
-                status = "Unsaved changes — Ctrl-Q again to force quit, Ctrl-S to save"
-                stdscr.addstr(height - 1, 0, status[: width - 1], curses.A_REVERSE)
-                stdscr.refresh()
-                confirm = _get_key(stdscr)
-                if confirm == "\x11":
+        elif key == "\x11":  # Ctrl-Q: quit (confirmation dialog)
+            action = _confirm_quit_dialog(
+                lambda: _get_key(stdscr),
+                lambda ch, sel: _draw_quit_dialog(
+                    stdscr, "Quit stdedit?",
+                    ["You have unsaved changes."] if buf.modified
+                    else ["There are no unsaved changes."],
+                    ch, sel),
+                bool(buf.modified), bool(buf.filename))
+            if action in ("quit", "discard"):
+                break
+            if action == "save":
+                try:
+                    buf.save()
                     break
-                continue
-            break
+                except ValueError:
+                    status = "No filename — cannot save"
+            else:
+                status = ""
         elif key == "\x13":  # Ctrl-S
             try:
                 buf.save()
@@ -1319,7 +1328,7 @@ HELP_SECTIONS = [
         "Ctrl-S              save current file",
         "Ctrl-P              settings / preferences",
         "Ctrl-O              quick open — fuzzy file search",
-        "Ctrl-Q              quit (press again to force with changes)",
+        "Ctrl-Q              quit (opens a confirmation dialog)",
     ]),
     ("FILE TREE (Ctrl-E panel)", [
         "Ctrl-E              open / focus the file tree",
@@ -1682,6 +1691,106 @@ def _yes_no_prompt(read_key, render, message) -> bool:
                 return True
             if k in ("n", "N", "\x1b"):
                 return False
+
+
+def _quit_dialog_choices(modified: bool, can_save: bool) -> list[tuple[str, str]]:
+    """Return the quit-dialog buttons as ``(label, action)`` pairs.
+
+    ``Cancel`` is always last so the default (focused) button is safe.
+    Actions: "quit" | "discard" | "save" | "cancel".
+    """
+    if not modified:
+        return [("Quit", "quit"), ("Cancel", "cancel")]
+    if can_save:
+        return [("Save & Quit", "save"), ("Discard & Quit", "discard"),
+                ("Cancel", "cancel")]
+    return [("Discard & Quit", "discard"), ("Cancel", "cancel")]
+
+
+def _quit_dialog_step(key, selected: int, choices: list[tuple[str, str]]):
+    """Map a dialog key to ``(new_selected, action_or_None)``.
+
+    Left/Right/Tab move the focus; Enter/Space pick the focused button;
+    Esc/n cancels; s/d/q/y are direct shortcuts.
+    """
+    n = len(choices)
+    if key == curses.KEY_LEFT:
+        return (selected - 1) % n, None
+    if key in (curses.KEY_RIGHT, "\t"):
+        return (selected + 1) % n, None
+    if key in ("\n", "\r", " "):
+        return selected, choices[selected][1]
+    if key in ("\x1b", "n", "N"):
+        return selected, "cancel"
+    if key in ("s", "S"):
+        actions = [a for _, a in choices]
+        if "save" in actions:
+            return selected, "save"
+    if key in ("d", "D", "q", "Q", "y", "Y"):
+        return selected, "discard" if any(a == "discard" for _, a in choices) else "quit"
+    return selected, None
+
+
+def _confirm_quit_dialog(read_key, render, modified: bool,
+                         can_save: bool) -> str:
+    """Quit-confirmation dialog loop. Returns "quit"|"discard"|"save"|"cancel".
+
+    ``render`` receives ``(choices, selected)`` each frame; callers wrap a
+    ``_draw_quit_dialog`` invocation so the dialog is fully unit-testable
+    without a terminal.
+    """
+    choices = _quit_dialog_choices(modified, can_save)
+    selected = len(choices) - 1  # default focus: Cancel
+    render(choices, selected)
+    while True:
+        try:
+            k = read_key()
+        except curses.error:
+            continue
+        selected, action = _quit_dialog_step(k, selected, choices)
+        if action is not None:
+            return action
+        render(choices, selected)
+
+
+def _draw_quit_dialog(stdscr, title: str, body: list[str],
+                      choices: list[tuple[str, str]], selected: int) -> None:
+    """Paint a centered bordered quit-confirmation box.
+
+    ``choices`` are ``(label, action)``; the focused button is highlighted
+    with reverse video and the rest are drawn bold.
+    """
+    height, width = stdscr.getmaxyx()
+    labels = [f"[ {label} ]" for label, _ in choices]
+    button_line = "   ".join(labels)
+    content_w = max([len(t) for t in body or [""]] + [len(button_line)])
+    inner_w = max(len(title) + 2, content_w)   # interior width between borders
+    inner_w = min(inner_w + 2, width - 3)
+    if len(title) > inner_w - 2:
+        title = title[:inner_w - 5] + "..."
+    box_h = len(body) + 4  # title, body, spacer, button-row, bottom
+    top = max(0, (height - box_h) // 2)
+    left = max(0, (width - inner_w) // 2 - 1)
+
+    def put(row, col, text, attr=0):
+        try:
+            stdscr.addstr(row, col, text[:width - col], attr)
+        except curses.error:
+            pass
+
+    fill = max(inner_w - len(title) - 2, 0)
+    put(top, left, "\u250c" + title + "\u2500" * fill + "\u2510",
+        curses.A_REVERSE)
+    for i, line in enumerate(body):
+        put(top + 1 + i, left,
+            "\u2502" + line.ljust(inner_w)[:inner_w] + "\u2502")
+    put(top + 1 + len(body), left, "\u2502" + " " * inner_w + "\u2502")
+    x = left + 1 + max(0, (inner_w - len(button_line)) // 2)
+    for i, label in enumerate(labels):
+        attr = curses.A_REVERSE if i == selected else curses.A_BOLD
+        put(top + len(body) + 1, x, label, attr)
+        x += len(label) + 3
+    put(top + box_h - 1, left, "\u2514" + "\u2500" * inner_w + "\u2518")
 
 
 def _prompt_line(read_key, render, title: str = "Open file: ") -> Optional[str]:

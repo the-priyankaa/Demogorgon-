@@ -6,7 +6,7 @@ Zero-dependency terminal text editor. Python stdlib only.
 
 ![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue)
 ![Zero Deps](https://img.shields.io/badge/deps-zero-brightgreen)
-![Tests](https://img.shields.io/badge/tests-477-passing)
+![Tests](https://img.shields.io/badge/tests-489-passing)
 ![Version](https://img.shields.io/badge/version-0.1.0-orange)
 
 ## Quick Start
@@ -103,7 +103,9 @@ Ctrl-Y              redo
 Ctrl-S              save current file
 Ctrl-P              settings / preferences
 Ctrl-O              quick open — fuzzy file search
-Ctrl-Q              quit (press again to force with changes)
+Ctrl-Q              quit (opens a confirmation dialog:
+                    Enter/Space confirm the focused button,
+                    s/d/q save / discard / cancel shortcuts)
 ```
 
 ### File Tree (Ctrl-E panel)
@@ -312,7 +314,7 @@ def setup(api):
 | Command | Description |
 |---------|-------------|
 | `make run FILE=file.py` | Run the editor |
-| `make test` | Run all tests (477 tests) |
+| `make test` | Run all tests (489 tests) |
 | `make proof` | Verify zero dependencies |
 | `make clean` | Remove `__pycache__` and artifacts |
 
