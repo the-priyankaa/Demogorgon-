@@ -121,7 +121,15 @@ LANGUAGES: Dict[str, dict] = {
     },
     "html": {
         "extensions": [".html", ".htm"],
-        "keywords": [],
+        "keywords": [
+            "doctype", "html", "head", "body", "title", "meta", "link",
+            "style", "script", "div", "span", "p", "a", "img", "br", "hr",
+            "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "table",
+            "thead", "tbody", "tr", "td", "th", "form", "input", "button",
+            "select", "option", "textarea", "label", "nav", "header",
+            "footer", "main", "section", "article", "aside", "figure",
+            "figcaption", "video", "audio", "iframe", "canvas",
+        ],
         "indent": {"size": 2, "increase": r"<[^/!-][^>]*>\s*$", "decrease": r"</"},
         "rules": [
             ("comment", r"<!--.*?-->"),
@@ -135,6 +143,16 @@ LANGUAGES: Dict[str, dict] = {
         "keywords": [
             "media", "import", "font-face", "keyframes", "charset",
             "namespace", "supports", "page", "document",
+            "color", "background", "background-color", "background-image",
+            "font-size", "font-family", "font-weight", "line-height",
+            "margin", "margin-top", "margin-right", "margin-bottom",
+            "margin-left", "padding", "padding-top", "padding-right",
+            "padding-bottom", "padding-left", "border", "border-radius",
+            "display", "position", "top", "right", "bottom", "left",
+            "width", "height", "min-width", "max-width", "overflow",
+            "flex", "grid", "gap", "align-items", "justify-content",
+            "z-index", "text-align", "text-decoration", "transform",
+            "transition", "opacity", "box-shadow", "cursor",
         ],
         "indent": {"size": 2, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
@@ -375,7 +393,12 @@ LANGUAGES: Dict[str, dict] = {
     },
     "xml": {
         "extensions": [".xml", ".svg", ".xhtml"],
-        "keywords": [],
+        "keywords": [
+            "version", "encoding", "standalone", "root", "element",
+            "attribute", "value", "cdata", "schema", "transform", "template",
+            "svg", "g", "path", "line", "rect", "circle", "text",
+            "fill", "stroke", "xmlns", "xlink", "d",
+        ],
         "indent": {"size": 2, "increase": r"<[^/!-][^>]*>\s*$", "decrease": r"</"},
         "rules": [
             ("comment", r"<!--.*?-->"),

@@ -11,6 +11,19 @@ from unittest import mock
 
 import stdedit.settings as settings
 
+_TMP_DIR = tempfile.mkdtemp(prefix="stdedit-test-settings-")
+
+
+def setUpModule():
+    """Sandbox the config layer so tests never touch the real settings file."""
+    settings.CONFIG_DIR = Path(_TMP_DIR)
+    settings.CONFIG_FILE = Path(_TMP_DIR) / "settings.json"
+
+
+def tearDownModule():
+    settings.CONFIG_DIR = Path.home() / ".config" / "stdedit"
+    settings.CONFIG_FILE = settings.CONFIG_DIR / "settings.json"
+
 
 class TestDefaults(unittest.TestCase):
     """Verify the module provides sane defaults when no config file exists."""

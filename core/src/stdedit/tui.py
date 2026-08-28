@@ -567,6 +567,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 explorer.visible = False
                 explorer.active = False
                 buf.filename = None
+                language = schema.detect_language(buf.filename or "")
                 status = "New file — type to edit, Ctrl-S to save it"
                 continue
             if key in ("c", "C"):
@@ -1450,6 +1451,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 sug_words = suggest.identifier_words(buf.lines)
             start, prefix = suggest.word_at(buf.current_line, buf.cursor_x)
             if (settings.get("suggestions_on") and prefix
+                    and not _in_double_quoted(buf)
                     and not (explorer.active or show_settings or show_help
                              or quick_open.visible or image_view_active)):
                 sug.open(language, sug_words, prefix)
@@ -1948,8 +1950,41 @@ def _draw_ghost(stdscr, buf, ghost, left_offset, gutter_width, text_width) -> No
         pass
 
 
+def _in_double_quoted(buf) -> bool:
+    """True if the cursor sits inside a double-quoted string.
+
+    Escape-aware scan of the lines before the cursor plus the current
+    line's prefix.  Tracks the opening quote kind ('"' or "'") so a
+    double quote inside a single-quoted string does not count.  Triple
+    quotes flip parity like single ones (a '''…''' docstring reads as
+    inside).  Comments containing quotes may mislead by design.
+    """
+    inside: str | None = None  # None | '"' | "'"
+    escaped = False
+
+    def scan(iterable):
+        nonlocal inside, escaped
+        for ch in iterable:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif inside is None:
+                if ch in ('"', "'"):
+                    inside = ch
+            elif ch == inside:
+                inside = None
+
+    for row in range(buf.cursor_y):
+        scan(buf.lines[row])
+    scan(buf.lines[buf.cursor_y][:buf.cursor_x])
+    return inside == '"'
+
+
 def _ghost_wanted(buf) -> bool:
     """True when an inline suggestion makes sense at the cursor."""
+    if _in_double_quoted(buf):
+        return False
     line = buf.current_line
     x = buf.cursor_x
     if x == 0:

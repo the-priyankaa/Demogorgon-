@@ -1,6 +1,11 @@
 import unittest
 
-from stdedit.languages.schema import detect_language, language_label, tokenize
+from stdedit.languages.schema import (
+    detect_language,
+    language_keywords,
+    language_label,
+    tokenize,
+)
 
 
 class TestLanguageDetection(unittest.TestCase):
@@ -65,6 +70,45 @@ class TestLanguageDetection(unittest.TestCase):
     def test_unknown_extension_is_plaintext(self):
         self.assertEqual(detect_language("notes.txt"), "plaintext")
         self.assertEqual(detect_language("no_extension"), "plaintext")
+
+
+class TestLanguageKeywords(unittest.TestCase):
+    """Suggestion keyword pools differ per file type."""
+    def test_detected_language_fall_backs_to_plaintext(self):
+        self.assertEqual(detect_language(""), "plaintext")
+        self.assertEqual(detect_language("untitled"), "plaintext")
+
+    def test_main_languages_have_distinct_keyword_sets(self):
+        langs = ["python", "javascript", "typescript", "c", "cpp", "java",
+                 "rust", "go", "sql", "shell"]
+        pools = [language_keywords(lg) for lg in langs]
+        for lg, pool in zip(langs, pools):
+            self.assertTrue(pool, f"{lg} keyword pool is empty")
+        for i in range(len(langs)):
+            for j in range(i + 1, len(langs)):
+                self.assertNotEqual(
+                    set(pools[i]), set(pools[j]),
+                    f"{langs[i]} and {langs[j]} share identical keyword pools")
+
+    def test_html_xml_css_have_distinct_keyword_sets(self):
+        pools = [language_keywords(lg) for lg in ("html", "xml", "css")]
+        for pool in pools:
+            self.assertTrue(pool)
+        self.assertNotEqual(set(pools[0]), set(pools[1]))
+        self.assertNotEqual(set(pools[0]), set(pools[2]))
+        self.assertNotEqual(set(pools[1]), set(pools[2]))
+
+    def test_html_suggests_tags_and_css_suggests_properties(self):
+        html_kw = set(language_keywords("html"))
+        css_kw = set(language_keywords("css"))
+        self.assertIn("div", html_kw)
+        self.assertIn("form", html_kw)
+        self.assertIn("color", css_kw)
+        self.assertIn("justify-content", css_kw)
+
+    def test_markdown_and_plaintext_have_no_keywords(self):
+        self.assertFalse(language_keywords("markdown"))
+        self.assertFalse(language_keywords("plaintext"))
 
 
 class TestPythonTokenizer(unittest.TestCase):

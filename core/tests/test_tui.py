@@ -11,6 +11,7 @@ from stdedit.tui import (
     _lines_fingerprint,
     _insert_text,
     _ghost_wanted,
+    _in_double_quoted,
     _draw_ghost,
     _draw_suggest_overlay,
     _fetch_ghost_text,
@@ -564,6 +565,19 @@ class TestMouseMultiClick(unittest.TestCase):
 
 
 class TestFontFamily(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from stdedit import settings
+        settings._settings = dict(settings._DEFAULTS)
+        tmp = Path(tempfile.mkdtemp()) / "settings.json"
+        self._mgr = mock.patch.object(settings, "CONFIG_FILE", tmp)
+        self._mgr.start()
+
+    def tearDown(self):
+        self._mgr.stop()
+
     def test_settings_panel_includes_font_keys(self):
         from stdedit import settings
         keys = [k for k, _ in settings.LABELS if k is not None]
@@ -927,6 +941,67 @@ class TestGhostWanted(unittest.TestCase):
 
     def test_after_space(self):
         self.assertTrue(_ghost_wanted(self.make_buffer("a b", 2)))
+
+
+class TestInDoubleQuoted(unittest.TestCase):
+    def make_buffer(self, lines, col, row=0):
+        b = Buffer()
+        b.lines = [lines] if isinstance(lines, str) else list(lines)
+        b.cursor_y = row
+        b.cursor_x = col
+        return b
+
+    def test_inside_unclosed_string(self):
+        self.assertTrue(_in_double_quoted(self.make_buffer('name = "ab', 10)))
+
+    def test_after_closing_quote(self):
+        self.assertFalse(_in_double_quoted(self.make_buffer('name = "ab"', 11)))
+
+    def test_between_pair(self):
+        self.assertTrue(_in_double_quoted(self.make_buffer('a = "x"', 6)))
+
+    def test_empty_string_after_close(self):
+        self.assertFalse(_in_double_quoted(self.make_buffer('a = ""', 6)))
+
+    def test_escaped_quote_stays_inside(self):
+        self.assertTrue(_in_double_quoted(self.make_buffer(r'a = "x\"y"', 9)))
+
+    def test_double_inside_single_does_not_count(self):
+        self.assertFalse(_in_double_quoted(self.make_buffer("a = 'it is \"fine\" c'", 20)))
+
+    def test_single_quoted_string_not_suppressed(self):
+        self.assertFalse(_in_double_quoted(self.make_buffer("a = 'xy", 7)))
+
+    def test_triple_quoted_body_is_inside(self):
+        self.assertTrue(_in_double_quoted(
+            self.make_buffer(['a = """doc', ' text */'], 6, row=1)))
+
+    def test_cursor_before_opening_quote(self):
+        self.assertFalse(_in_double_quoted(self.make_buffer('prefix "text"', 3)))
+
+    def test_inside_string_only_on_its_own_line(self):
+        self.assertTrue(_in_double_quoted(
+            self.make_buffer(['plain', 'x = "abc', 'z'], 10, row=1)))
+        self.assertFalse(_in_double_quoted(
+            self.make_buffer(['x = "abc"', ' z'], 3, row=1)))
+
+
+class TestGhostWantedDoubleQuote(unittest.TestCase):
+    def make_buffer(self, lines, col, row=0):
+        b = Buffer()
+        b.lines = [lines] if isinstance(lines, str) else list(lines)
+        b.cursor_y = row
+        b.cursor_x = col
+        return b
+
+    def test_no_ghost_inside_double_quoted_string(self):
+        self.assertFalse(_ghost_wanted(self.make_buffer('tag = "val', 10)))
+
+    def test_no_ghost_at_line_end_inside_string(self):
+        self.assertFalse(_ghost_wanted(self.make_buffer('print("x', 9)))
+
+    def test_ghost_returns_outside_string_after_close(self):
+        self.assertTrue(_ghost_wanted(self.make_buffer('print("x") ; ', 14)))
 
 
 class TestDrawGhost(unittest.TestCase):

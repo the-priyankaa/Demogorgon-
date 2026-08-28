@@ -6,7 +6,7 @@ Zero-dependency terminal text editor. Python stdlib only.
 
 ![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue)
 ![Zero Deps](https://img.shields.io/badge/deps-zero-brightgreen)
-![Tests](https://img.shields.io/badge/tests-584-passing)
+![Tests](https://img.shields.io/badge/tests-602-passing)
 ![Version](https://img.shields.io/badge/version-0.1.0-orange)
 
 ## Quick Start
@@ -64,11 +64,17 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 
 **Auto-suggest & AI Completions**
 - Local suggestion popup (VS Code-style): auto-triggers while typing an
-  identifier and shows language keywords plus identifiers already in the
-  open file, ranked by keyword-priority then frequency. `Tab` / `Enter`
-  insert the highlighted candidate, `Esc` dismisses, `^`/`v` move the
-  selection. Select **Auto-suggest** in Settings (`Ctrl-P`), on top of the
-  default **Suggestions: off**.
+  identifier and shows the keyword pool of the current file type plus
+  identifiers already in the open file, ranked by keyword-priority then
+  frequency. Each language has its own keyword set (Python, JS, Go, C++,
+  HTML tags, CSS properties, XML, …), so `.py`, `.js` and `.html` files
+  suggest different keywords. `Tab` / `Enter` insert the highlighted
+  candidate, `Esc` dismisses, `^`/`v` move the selection. Select
+  **Auto-suggest** in Settings (`Ctrl-P`), on top of the default
+  **Suggestions: off**.
+- No popup or AI ghost is ever offered while the cursor is inside a
+  double-quoted string (e.g. `name = "ja"` stays quiet), so string literal
+  content never triggers suggestions.
 - Codeium AI inline ghost text (opt-in): dim suggestion shown at the cursor
   after ~0.35s of idle typing; `Tab` accepts, `Esc` dismisses. Select
   **AI inline (Codeium)** in Settings (`Ctrl-P`, default is off via
@@ -382,7 +388,7 @@ def setup(api):
 | Command | Description |
 |---------|-------------|
 | `make run FILE=file.py` | Run the editor |
-| `make test` | Run all tests (584 tests) |
+| `make test` | Run all tests (602 tests) |
 | `make proof` | Verify zero dependencies |
 | `make clean` | Remove `__pycache__` and artifacts |
 
