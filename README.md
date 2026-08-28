@@ -121,6 +121,7 @@ Ctrl-R              replace all occurrences
 ```
 typing              while typing an identifier, matching keywords and
                     document identifiers appear in a popup below the cursor
+                    (no popup appears inside double-quoted strings)
 ^ / v               move popup selection (while the popup is open)
 Tab / Enter         insert the highlighted suggestion
 Esc                 dismiss the popup / inline ghost text
@@ -334,7 +335,10 @@ make deps-fix       # auto-install missing helpers via detected package manager
 group — exactly one option is active. `suggestions_off` (default on →
 suggestions disabled by default), `suggestions_on` (local keyword/identifier
 popup), and `codeium_on` (dim AI inline ghost text shown after a short pause
-while typing). Switching one option clears the others.
+while typing). Switching one option clears the others. Keyword pools are
+per-file-type (HTML tags, CSS properties, Python keywords, …), and neither
+the popup nor the AI ghost appears while the cursor is inside a
+double-quoted string.
 
 **Themes:** default, Monokai, Dracula, Solarized Dark, Solarized Light, Nord, One Dark, Tokyo Night, Gruvbox Dark, Catppuccin Mocha, Rose Pine, GitHub Light, Zenburn, Everforest, Ayu. On 256-color terminals each theme uses its true palette; fewer colors fold tones to the closest base color.
 
@@ -418,6 +422,7 @@ src/stdedit/
 ├── git_panel.py         Source control panel (VS Code-style)
 ├── github_api.py        GitHub CLI (gh) integration
 ├── codeium.py           Codeium AI inline-completion
+├── suggest.py           Local suggestion engine (keywords + identifiers)
 ├── icons.py             Nerd Font glyph mapping
 ├── install.py           'carl' installer (venv + symlinks)
 ├── perf.py              RSS memory + frame timing
