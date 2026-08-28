@@ -46,7 +46,7 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 **Themes** — 15 built-in color themes: default, Monokai, Dracula, Solarized Dark, Solarized Light, Nord, One Dark, Tokyo Night, Gruvbox Dark, Catppuccin Mocha, Rose Pine, GitHub Light, Zenburn, Everforest, Ayu
 
 **Panels & Overlays**
-- Welcome Dashboard (opens with no file/project): YUKI front panel — Find File, Open Folder, New File, Recent Files, Restore Session, Config, Help and Quit
+- Welcome Dashboard (opens with no file/project): YUKI front panel — Find File, Open Folder (native dialog), New File, Recent Files, Restore Session, Settings, Help and Quit
 - File Explorer (`Ctrl-E`): tree view, search, create, delete, rename, copy path
 - Source Control (`Ctrl-G`): stage, unstage, commit, push, pull, branch switch, stash
 - Quick Open (`Ctrl-O`): fuzzy file search — background indexing **and** background result matching, home-directory search from the dashboard, recent-files fallback
@@ -263,8 +263,10 @@ stdedit [file] [options]
 Running `stdedit` with no file (and no `--project`) opens the **welcome
 dashboard**: ↑/↓ navigate its options, Enter/Space activates the selected
 one, or press the key shown on each tile (`F` Find File, `O` Open Folder,
-`N` New File, `R` Recent Files, `S` Restore Session, `C` Config, `H`/F1
-Help, `Q`/Ctrl-Q quit).
+`N` New File, `R` Recent Files, `S` Restore Session, `C` Settings, `H`/F1
+Help, `Q`/Ctrl-Q quit). `O` opens a native system folder dialog via
+`zenity` (or `kdialog`); without one it falls back to browsing your home
+directory.
 
 | Option | Description |
 |--------|-------------|

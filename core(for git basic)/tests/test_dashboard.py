@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from stdedit.dashboard import action_key, action_count, layout
+from stdedit.dashboard import action_key, action_count, layout, draw
 from stdedit.quick_open import build_file_index
 
 
@@ -30,6 +30,53 @@ class DashboardLayoutTests(unittest.TestCase):
         self.assertEqual(
             set(keys),
             {"F", "O", "N", "R", "S", "C", "H", "Q"})
+
+
+class DashboardDrawTests(unittest.TestCase):
+    def test_draw_renders_transient_message(self):
+        from unittest import mock
+        import stdedit.dashboard as db
+
+        class Fake:
+            def __init__(self, w, h):
+                self.w, self.h = w, h
+                self.calls = []
+
+            def getmaxyx(self):
+                return self.h, self.w
+
+            def erase(self):
+                pass
+
+            def refresh(self):
+                pass
+
+            def addstr(self, *args):
+                self.calls.append(args)
+
+            def addch(self, *args):
+                pass
+
+            def hline(self, *args):
+                pass
+
+            def vline(self, *args):
+                pass
+
+        fake = Fake(90, 30)
+        with mock.patch.object(db, "init_colors"), \
+                mock.patch.object(db.curses, "ACS_HLINE", "-", create=True), \
+                mock.patch.object(db.curses, "ACS_VLINE", "|", create=True):
+            draw(fake, 0, 1.0, "10 MiB", message="Folder dialog cancelled")
+        bottom = fake.calls[-1][2]
+        self.assertIn("Folder dialog cancelled", bottom)
+        self.assertIn("Enter selects", bottom)
+        fake2 = Fake(90, 30)
+        with mock.patch.object(db, "init_colors"), \
+                mock.patch.object(db.curses, "ACS_HLINE", "-", create=True), \
+                mock.patch.object(db.curses, "ACS_VLINE", "|", create=True):
+            draw(fake2, 0, 1.0, "10 MiB")
+        self.assertNotIn("Folder dialog cancelled", fake2.calls[-1][2])
 
 
 class HomeSearchScopeTests(unittest.TestCase):

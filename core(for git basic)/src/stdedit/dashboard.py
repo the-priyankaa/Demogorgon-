@@ -37,7 +37,7 @@ ACTIONS = [
     ("□", "N", "New File", "Start editing a new file"),
     ("◷", "R", "Recent Files", "Open recently edited files"),
     ("↻", "S", "Restore Session", "Open the most recent file"),
-    ("⚙", "C", "Config", "Edit configuration"),
+    ("⚙", "C", "Settings", "Edit configuration"),
     ("?", "H", "Help", "Keyboard reference (F1)"),
     ("⇥", "Q", "Quit", "Exit Yuki"),
 ]
@@ -293,7 +293,7 @@ def _draw_shortcuts(stdscr, r: Rect) -> None:
     if r.h <= 0:
         return
     _box(stdscr, r, "SHORTCUTS")
-    rows = ["<Enter>/<Space> : Activate", "F        : Find File", "O        : Open Folder", "N        : New File", "R        : Recent Files", "S        : Restore Session", "C        : Config", "H / F1   : Help", "Q        : Quit"]
+    rows = ["<Enter>/<Space> : Activate", "F        : Find File", "O        : Open Folder", "N        : New File", "R        : Recent Files", "S        : Restore Session", "C        : Settings", "H / F1   : Help", "Q        : Quit"]
     for i, line in enumerate(rows[: max(0, r.h - 2)]):
         safe_addstr(stdscr, r.y + 1 + i, r.x + 2, _truncate(line, r.w - 4), cp(GREEN_PAIR), r.w - 4)
 
@@ -309,7 +309,8 @@ def _draw_tip(stdscr, r: Rect) -> None:
         safe_addstr(stdscr, start + i, x, line, cp(GREEN_PAIR), r.w - (x - r.x) - 1)
 
 
-def draw(stdscr, selected: int, uptime: float, ram_label: str, project: str = "none") -> None:
+def draw(stdscr, selected: int, uptime: float, ram_label: str, project: str = "none",
+         message: str = "") -> None:
     """Draw the dashboard at the current terminal dimensions."""
     height, width = stdscr.getmaxyx()
     init_colors()
@@ -324,6 +325,8 @@ def draw(stdscr, selected: int, uptime: float, ram_label: str, project: str = "n
     _draw_shortcuts(stdscr, boxes["shortcuts"])
     _draw_tip(stdscr, boxes["tip"])
     status = "NORMAL   no project   •   Enter selects   •   ↑↓ navigate   •   Q quits"
+    if message:
+        status = f"{message}   •   {status}"
     safe_addstr(stdscr, height - 1, 2, _truncate(status, max(0, width - 4)), cp(GREEN_REVERSE_PAIR, curses.A_BOLD))
     stdscr.refresh()
 

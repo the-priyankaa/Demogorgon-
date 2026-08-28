@@ -49,6 +49,7 @@ from . import completion
 from . import dashboard
 from . import themes
 from . import imageviewer
+from . import pickdir
 
 _COLOR_PAIRS = {
     "keyword": 1,
@@ -473,6 +474,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     quick_open = QuickOpen(search_root, exclude_roots=excluded_search_roots, show_recent_on_empty=False)
     dashboard_selected = 0
     dashboard_started = time.perf_counter()
+    dashboard_message = ""
     while True:
         frame_started = meter.frame_start()
         if dashboard_active:
@@ -482,8 +484,10 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 dashboard_selected,
                 time.perf_counter() - dashboard_started,
                 format_bytes(meter.rss),
+                message=dashboard_message,
             )
             key = _get_key(stdscr)
+            dashboard_message = ""
             if key in ("q", "Q", "\x11"):
                 return
             if key in (curses.KEY_UP,):
@@ -512,13 +516,25 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 dashboard_active = False
                 continue
             if key in ("o", "O"):
-                dashboard_active = False
-                explorer.set_root(os.path.expanduser("~"))
-                explorer.visible = True
-                explorer.active = True
-                root_dir = os.path.expanduser("~")
-                quick_open = QuickOpen(root_dir, show_recent_on_empty=False)
-                status = "Folder browser — Enter opens files/folders, Esc to focus the editor"
+                result = pickdir.choose_directory()
+                if result[0] == "ok":
+                    dashboard_active = False
+                    explorer.set_root(result[1])
+                    explorer.visible = True
+                    explorer.active = True
+                    root_dir = result[1]
+                    quick_open = QuickOpen(root_dir, show_recent_on_empty=False)
+                    status = f"Folder browser: {result[1]} — Enter opens files/folders, Esc to focus the editor"
+                elif result[0] == "cancelled":
+                    dashboard_message = "Folder dialog cancelled"
+                else:
+                    dashboard_active = False
+                    explorer.set_root(os.path.expanduser("~"))
+                    explorer.visible = True
+                    explorer.active = True
+                    root_dir = os.path.expanduser("~")
+                    quick_open = QuickOpen(root_dir, show_recent_on_empty=False)
+                    status = "System folder dialog unavailable — browsing home"
                 continue
             if key in ("n", "N"):
                 dashboard_active = False
