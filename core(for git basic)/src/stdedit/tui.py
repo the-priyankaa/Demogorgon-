@@ -494,7 +494,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 continue
             if key in ("\n", "\r", " "):
                 key = dashboard.action_key(dashboard_selected)
-            if key in ("f", "F") or key == curses.KEY_F1:
+            if key in ("f", "F"):
                 explorer.set_root(os.path.expanduser("~"))
                 explorer.active = False
                 explorer.visible = False
@@ -511,13 +511,21 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 stdscr.timeout(50)
                 dashboard_active = False
                 continue
-            if key in ("n", "N"):
+            if key in ("o", "O"):
                 dashboard_active = False
                 explorer.set_root(os.path.expanduser("~"))
+                explorer.visible = True
                 explorer.active = True
                 root_dir = os.path.expanduser("~")
                 quick_open = QuickOpen(root_dir, show_recent_on_empty=False)
-                status = "New file: use the tree or save to choose a filename"
+                status = "Folder browser — Enter opens files/folders, Esc to focus the editor"
+                continue
+            if key in ("n", "N"):
+                dashboard_active = False
+                explorer.visible = False
+                explorer.active = False
+                buf.filename = None
+                status = "New file — type to edit, Ctrl-S to save it"
                 continue
             if key in ("c", "C"):
                 dashboard_active = False
@@ -539,14 +547,10 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 else:
                     status = "No recent file to restore"
                 continue
-            if key in ("l", "L"):
+            if key in ("h", "H") or key == curses.KEY_F1:
                 dashboard_active = False
-                explorer.visible = False
-                explorer.active = False
-                status = "Lightweight editor ready"
-                continue
-            if key in ("g", "G"):
-                status = "Find Text operates on the current file; open a file first"
+                show_help = True
+                help_scroll = 0
                 continue
             continue
         if buf.image_format is not None and image_view_active:

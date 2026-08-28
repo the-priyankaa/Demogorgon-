@@ -32,13 +32,13 @@ LOGO = [
 ]
 
 ACTIONS = [
-    ("⌕", "F1", "Find File", "Search and open a file"),
-    ("□", "N", "New File", "Create a new file"),
+    ("⌕", "F", "Find File", "Search and open a file"),
+    ("▤", "O", "Open Folder", "Browse a folder in the file tree"),
+    ("□", "N", "New File", "Start editing a new file"),
     ("◷", "R", "Recent Files", "Open recently edited files"),
-    ("▤", "G", "Find Text", "Search text in the current file"),
-    ("⚙", "C", "Config", "Edit configuration"),
     ("↻", "S", "Restore Session", "Open the most recent file"),
-    ("zzz", "L", "Lazy", "Start the lightweight editor"),
+    ("⚙", "C", "Config", "Edit configuration"),
+    ("?", "H", "Help", "Keyboard reference (F1)"),
     ("⇥", "Q", "Quit", "Exit Yuki"),
 ]
 
@@ -293,7 +293,7 @@ def _draw_shortcuts(stdscr, r: Rect) -> None:
     if r.h <= 0:
         return
     _box(stdscr, r, "SHORTCUTS")
-    rows = ["<Space> : Command Palette", "F / F1   : Find File", "G        : Find Text", "C        : Config", "Q        : Quit"]
+    rows = ["<Enter>/<Space> : Activate", "F        : Find File", "O        : Open Folder", "N        : New File", "R        : Recent Files", "S        : Restore Session", "C        : Config", "H / F1   : Help", "Q        : Quit"]
     for i, line in enumerate(rows[: max(0, r.h - 2)]):
         safe_addstr(stdscr, r.y + 1 + i, r.x + 2, _truncate(line, r.w - 4), cp(GREEN_PAIR), r.w - 4)
 

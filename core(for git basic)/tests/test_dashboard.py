@@ -20,8 +20,16 @@ class DashboardLayoutTests(unittest.TestCase):
 
     def test_action_mapping(self):
         self.assertEqual(action_count(), 8)
-        self.assertEqual(action_key(0), "F1")
+        self.assertEqual(action_key(0), "F")
         self.assertEqual(action_key(7), "Q")
+
+    def test_action_keys_unique(self):
+        from stdedit.dashboard import ACTIONS
+        keys = [a[1] for a in ACTIONS]
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertEqual(
+            set(keys),
+            {"F", "O", "N", "R", "S", "C", "H", "Q"})
 
 
 class HomeSearchScopeTests(unittest.TestCase):
