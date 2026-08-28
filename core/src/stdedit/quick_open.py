@@ -352,6 +352,10 @@ class QuickOpen:
             self.selected_idx = 0
             self.loading = False
             self.scoring = False
+            self.files = []
+            self._lowers = []
+            self._files_version = 0
+            self._last_version = 0
 
     def update_query(self, query: str) -> None:
         """Record a new query without blocking the caller.

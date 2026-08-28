@@ -17,6 +17,7 @@ from stdedit.tui import (
     _fetch_ghost_text,
     _draw_settings_overlay,
     _draw_quick_open_overlay,
+    _forget_image_pixels,
     RecentPicker,
     _draw_recent_overlay,
 )
@@ -1305,6 +1306,29 @@ class TestDrawQuickOpenOverlay(unittest.TestCase):
         _draw_quick_open_overlay(s, qo)
         texts = "".join(t for _, _, t, _ in s.calls)
         self.assertIn("No matches", texts)
+
+
+class TestForgetImagePixels(unittest.TestCase):
+    def test_drops_pixels_and_error_keeps_view(self):
+        st = {
+            "pixels": [(106, 107, 109)] * 100,
+            "width": 1432,
+            "height": 711,
+            "error": None,
+            "decoded": True,
+            "zoom": 2.5,
+            "pan_x": 12,
+            "pan_y": 4,
+            "path": "/tmp/img.png",
+        }
+        _forget_image_pixels(st)
+        self.assertIsNone(st["pixels"])
+        self.assertFalse(st["decoded"])
+        self.assertIsNone(st["error"])
+        self.assertEqual(st["zoom"], 2.5)
+        self.assertEqual(st["pan_x"], 12)
+        self.assertEqual(st["pan_y"], 4)
+        self.assertEqual(st["path"], "/tmp/img.png")
 
 
 if __name__ == "__main__":

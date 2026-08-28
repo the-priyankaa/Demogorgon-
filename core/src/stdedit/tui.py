@@ -203,6 +203,18 @@ def _draw_centered_message(stdscr, line: str, height: int, width: int,
         pass
 
 
+def _forget_image_pixels(st: dict) -> None:
+    """Drop the decoded pixel cache for the image-viewer state dict.
+
+    Zoom/pan are kept so re-entering the viewer preserves the view; the
+    pixels are re-decoded on the next entry. Releasing them here is what
+    stops a large image from staying resident for the whole session.
+    """
+    st["pixels"] = None
+    st["decoded"] = False
+    st["error"] = None
+
+
 def _image_viewer_frame(stdscr, buf: Buffer, st: dict) -> Optional[str]:
     """Render and drive one frame of the integrated image viewer.
 
@@ -600,10 +612,12 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 return
             if action == "exit":
                 image_view_active = False
+                _forget_image_pixels(image_state)
                 status = "Raw binary view — Ctrl-\\ re-opens the image viewer"
             continue
         if (buf.image_format is not None
                 and image_state.get("path") != buf.image_path):
+            _forget_image_pixels(image_state)
             image_state["path"] = buf.image_path
             image_view_active = True
             status = "Image opened — viewer active"

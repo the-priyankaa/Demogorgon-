@@ -126,6 +126,26 @@ class TestQuickOpen(unittest.TestCase):
         qo.open()
         self.assertIsNone(qo.selected_path())
 
+    def test_close_releases_index(self):
+        d = tempfile.mkdtemp(prefix="stdedit-qo-")
+        try:
+            for name in ("a.py", "b.py", "c.py"):
+                with open(os.path.join(d, name), "w") as f:
+                    f.write("x")
+            qo = QuickOpen(d)
+            qo.open()
+            deadline = __import__("time").time() + 2.0
+            while (__import__("time").time() < deadline
+                   and not qo.files):
+                __import__("time").sleep(0.01)
+            self.assertTrue(qo.files)
+            self.assertEqual(len(qo.files), len(qo._lowers))
+            qo.close()
+            self.assertEqual(qo.files, [])
+            self.assertEqual(qo._lowers, [])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
 
 class TestDirectLocation(unittest.TestCase):
     def setUp(self):
