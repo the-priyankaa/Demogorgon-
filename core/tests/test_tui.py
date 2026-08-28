@@ -16,9 +16,36 @@ from stdedit.tui import (
     _draw_suggest_overlay,
     _fetch_ghost_text,
     _draw_settings_overlay,
+    RecentPicker,
+    _draw_recent_overlay,
 )
 from stdedit.buffer import Buffer
 from stdedit import suggest
+
+import tempfile as _tempfile
+import pathlib as _pathlib
+
+_TMP_RECENT_DIR = _pathlib.Path(_tempfile.mkdtemp(prefix="stdedit-test-tui-"))
+_RECENT_ORIG_DIR = None
+_RECENT_ORIG_FILE = None
+
+
+def setUpModule():
+    """Sandbox the recent-files store so test opens never touch the real one."""
+    from stdedit import recent
+    global _RECENT_ORIG_DIR, _RECENT_ORIG_FILE
+    _RECENT_ORIG_DIR = recent.CONFIG_DIR
+    _RECENT_ORIG_FILE = recent.RECENT_FILE
+    recent.CONFIG_DIR = _TMP_RECENT_DIR
+    recent.RECENT_FILE = _TMP_RECENT_DIR / "recent.json"
+    recent._recent = []
+
+
+def tearDownModule():
+    from stdedit import recent
+    recent.CONFIG_DIR = _RECENT_ORIG_DIR
+    recent.RECENT_FILE = _RECENT_ORIG_FILE
+    recent._recent = []
 
 
 class TestLineNumbers(unittest.TestCase):
@@ -748,26 +775,30 @@ class TestSettingsAccordion(unittest.TestCase):
     def test_suggestions_radio_marks_only_active(self):
         """With Auto-suggest selected, only its radio row is marked (x)."""
         from stdedit import settings
-        settings._settings["suggestions_off"] = False
-        settings._settings["suggestions_on"] = True
-        settings._settings["codeium_on"] = False
+        saved = dict(settings._settings)
+        try:
+            settings._settings["suggestions_off"] = False
+            settings._settings["suggestions_on"] = True
+            settings._settings["codeium_on"] = False
 
-        class FakeScr:
-            def __init__(self):
-                self.lines = []
+            class FakeScr:
+                def __init__(self):
+                    self.lines = []
 
-            def getmaxyx(self):
-                return (24, 80)
+                def getmaxyx(self):
+                    return (24, 80)
 
-            def addstr(self, row, col, text, attr):
-                self.lines.append(text)
+                def addstr(self, row, col, text, attr):
+                    self.lines.append(text)
 
-        s = FakeScr()
-        _draw_settings_overlay(s, 0, 30, {"SUGGESTIONS": True})
-        joined = "\n".join(s.lines)
-        self.assertIn("( ) Suggestions: off", joined)
-        self.assertIn("(x) Auto-suggest", joined)
-        self.assertIn("( ) AI inline (Codeium)", joined)
+            s = FakeScr()
+            _draw_settings_overlay(s, 0, 30, {"SUGGESTIONS": True})
+            joined = "\n".join(s.lines)
+            self.assertIn("( ) Suggestions: off", joined)
+            self.assertIn("(x) Auto-suggest", joined)
+            self.assertIn("( ) AI inline (Codeium)", joined)
+        finally:
+            settings._settings = saved
 
 
 class TestQuitDialog(unittest.TestCase):
@@ -1096,6 +1127,132 @@ class TestFetchGhostText(unittest.TestCase):
             self.assertIsNone(_fetch_ghost_text(None))
         finally:
             del os.environ["STDEDIT_FAKE_GHOST"]
+
+
+class TestRecentPicker(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from unittest import mock
+        from stdedit import tui, recent
+        self._dir = tempfile.mkdtemp()
+        self._recent = recent
+        self._patch = mock.patch.object(tui.recent, "get_recent", return_value=[])
+        self._get_recent = self._patch.start()
+        self.picker = tui.RecentPicker()
+
+    def tearDown(self):
+        self._patch.stop()
+
+    def existing_file(self, name="a.txt"):
+        path = os.path.join(self._dir, name)
+        open(path, "w").close()
+        return path
+
+    def test_open_keeps_only_existing_most_recent_first(self):
+        keep1 = self.existing_file("b.txt")
+        keep2 = self.existing_file("a.txt")
+        self._get_recent.return_value = [os.path.join(self._dir, "gone.txt"),
+                                         keep1, keep2]
+        self.picker.open()
+        self.assertTrue(self.picker.active)
+        self.assertEqual(self.picker.entries, [keep1, keep2])
+        self.assertEqual(self.picker.selected, 0)
+        self.assertEqual(self.picker.selected_path(), keep1)
+
+    def test_open_marks_active_and_resets_selection(self):
+        self._get_recent.return_value = [self.existing_file("x.txt")]
+        self.picker.open()
+        self.picker.move_selection(1)
+        self.picker.open()
+        self.assertEqual(self.picker.selected, 0)
+
+    def test_open_caps_entries(self):
+        paths = [self.existing_file(f"f{i}.txt") for i in range(15)]
+        self._get_recent.return_value = paths
+        self.picker.open()
+        self.assertEqual(len(self.picker.entries), RecentPicker.MAX_ENTRIES)
+        self.assertEqual(self.picker.entries[0], paths[0])
+
+    def test_empty_recent_produces_no_path(self):
+        self._get_recent.return_value = []
+        self.picker.open()
+        self.assertEqual(self.picker.entries, [])
+        self.assertIsNone(self.picker.selected_path())
+
+    def test_move_selection_clamps_at_both_ends(self):
+        self._get_recent.return_value = [self.existing_file(f"f{i}.txt")
+                                         for i in range(3)]
+        self.picker.open()
+        self.picker.move_selection(-1)
+        self.assertEqual(self.picker.selected, 0)
+        self.picker.move_selection(5)
+        self.assertEqual(self.picker.selected, 2)
+        self.picker.move_selection(1)
+        self.assertEqual(self.picker.selected, 2)
+
+    def test_close_clears_active(self):
+        self._get_recent.return_value = [self.existing_file("x.txt")]
+        self.picker.open()
+        self.picker.close()
+        self.assertFalse(self.picker.active)
+
+    def test_selected_path_follows_selection(self):
+        p1 = self.existing_file("one.txt")
+        p2 = self.existing_file("two.txt")
+        self._get_recent.return_value = [p1, p2]
+        self.picker.open()
+        self.picker.move_selection(1)
+        self.assertEqual(self.picker.selected_path(), p2)
+
+
+class TestDrawRecentOverlay(unittest.TestCase):
+    class FakeScr:
+        def __init__(self):
+            self.calls = []
+
+        def addstr(self, row, col, text, attr):
+            self.calls.append((row, col, text, attr))
+
+    def test_draws_title_and_entries(self):
+        p = RecentPicker()
+        p.entries = ["/tmp/one.txt", "/tmp/two.txt"]
+        p.selected = 0
+        p.active = True
+        s = self.FakeScr()
+        _draw_recent_overlay(s, p, 24, 60)
+        texts = "".join(t for _, _, t, _ in s.calls)
+        self.assertIn("RECENT FILES", texts)
+        self.assertIn("/tmp/one.txt", texts)
+        self.assertIn("/tmp/two.txt", texts)
+        self.assertIn("select", texts)
+
+    def test_selected_entry_is_reversed(self):
+        p = RecentPicker()
+        p.entries = ["/tmp/one.txt", "/tmp/two.txt"]
+        p.selected = 1
+        s = self.FakeScr()
+        _draw_recent_overlay(s, p, 24, 60)
+        highlighted = [t for _, _, t, a in s.calls if a == curses.A_REVERSE]
+        self.assertTrue(any("/tmp/two.txt" in t for t in highlighted))
+
+    def test_empty_state_message(self):
+        p = RecentPicker()
+        p.entries = []
+        p.selected = 0
+        s = self.FakeScr()
+        _draw_recent_overlay(s, p, 24, 60)
+        texts = "".join(t for _, _, t, _ in s.calls)
+        self.assertIn("No recent files", texts)
+
+    def test_scroll_window_on_short_terminal(self):
+        p = RecentPicker()
+        p.entries = [f"/tmp/file{i}.txt" for i in range(10)]
+        p.selected = 9
+        s = self.FakeScr()
+        _draw_recent_overlay(s, p, 10, 60)
+        texts = "".join(t for _, _, t, _ in s.calls)
+        self.assertIn("/tmp/file9.txt", texts)
+        self.assertNotIn("/tmp/file0.txt", texts)
 
 
 if __name__ == "__main__":

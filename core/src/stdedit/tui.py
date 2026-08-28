@@ -475,6 +475,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     excluded_search_roots = [package_root] if dashboard_active else []
     quick_open = QuickOpen(search_root, exclude_roots=excluded_search_roots, show_recent_on_empty=False)
+    recent_picker = RecentPicker()
     dashboard_selected = 0
     dashboard_started = time.perf_counter()
     dashboard_message = ""
@@ -533,11 +534,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 dashboard_active = False
                 continue
             if key in ("r", "R"):
-                explorer.set_root(os.path.expanduser("~"))
-                explorer.active = False
-                explorer.visible = False
-                quick_open = QuickOpen(os.path.expanduser("~"), exclude_roots=excluded_search_roots, show_recent_on_empty=True)
-                quick_open.open(background_index=False)
+                recent_picker.open()
                 stdscr.timeout(50)
                 dashboard_active = False
                 continue
@@ -745,6 +742,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                                help_scroll)
         if quick_open.visible:
             _draw_quick_open_overlay(stdscr, quick_open)
+        if recent_picker.active:
+            _draw_recent_overlay(stdscr, recent_picker, height, width)
 
         if sug.visible and not (show_settings or show_help
                                 or explorer.active or image_view_active):
@@ -764,7 +763,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         _prev_modified = buf.modified
         _editor_idle = not (explorer.active or show_settings or show_help
-                            or quick_open.visible or image_view_active)
+                            or quick_open.visible or recent_picker.active
+                            or image_view_active)
         if settings.get("codeium_on"):
             stdscr.timeout(350 if _editor_idle else 50)
         key = _get_key(stdscr)
@@ -949,6 +949,42 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                     _apply_font_family()
             elif key in ("\x1b", "\x10", "q"):
                 show_settings = False
+            continue
+
+        # Recent Files picker overlay (from the dashboard).
+        if recent_picker.active:
+            if key is None:
+                continue
+            if key in ("\x1b", "q"):
+                recent_picker.close()
+                stdscr.timeout(-1)
+                dashboard_active = True
+                continue
+            if key in ("\n", "\r"):
+                path = recent_picker.selected_path()
+                if path:
+                    recent_picker.close()
+                    stdscr.timeout(-1)
+                    language, status = open_file_path(
+                        stdscr, buf, explorer, path,
+                        render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
+                    )
+                    if status.startswith("Opened"):
+                        buf.configure_for_language(language)
+                        explorer.active = False
+                    dashboard_active = False
+                else:
+                    recent_picker.close()
+                    stdscr.timeout(-1)
+                    dashboard_active = True
+                    status = "No recent files"
+                continue
+            if key == curses.KEY_UP:
+                recent_picker.move_selection(-1)
+                continue
+            if key == curses.KEY_DOWN:
+                recent_picker.move_selection(1)
+                continue
             continue
 
         # Quick Open overlay (Ctrl-O).
@@ -1453,7 +1489,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             if (settings.get("suggestions_on") and prefix
                     and not _in_double_quoted(buf)
                     and not (explorer.active or show_settings or show_help
-                             or quick_open.visible or image_view_active)):
+                             or quick_open.visible or recent_picker.active
+                             or image_view_active)):
                 sug.open(language, sug_words, prefix)
             else:
                 sug.close()
@@ -2018,6 +2055,91 @@ def _fetch_ghost_text(buf) -> "object | None":
         return None
     return codeium.get_completion(
         buf.lines, buf.cursor_y, buf.cursor_x, buf.filename or "", key)
+
+
+class RecentPicker:
+    """Modal recent-files list for the dashboard.
+
+    ``open()`` snapshots the current recent files — most recent first,
+    paths that no longer exist filtered out, capped at ``MAX_ENTRIES``.
+    The TUI renders it as a bordered overlay and opens ``selected_path``
+    on Enter.
+    """
+
+    MAX_ENTRIES = 10
+
+    def __init__(self) -> None:
+        self.active = False
+        self.entries: list[str] = []
+        self.selected = 0
+
+    def open(self) -> None:
+        self.entries = [
+            p for p in recent.get_recent()
+            if p and os.path.isfile(p)
+        ][: self.MAX_ENTRIES]
+        self.selected = 0
+        self.active = True
+
+    def close(self) -> None:
+        self.active = False
+
+    def selected_path(self) -> str | None:
+        if 0 <= self.selected < len(self.entries):
+            return self.entries[self.selected]
+        return None
+
+    def move_selection(self, dy: int) -> None:
+        if self.entries:
+            self.selected = max(0, min(self.selected + dy, len(self.entries) - 1))
+
+
+def _draw_recent_overlay(stdscr, picker: RecentPicker, height: int, width: int) -> None:
+    """Paint the bordered recent-files picker overlay."""
+    items = picker.entries
+    inner_w = max(40, min(72, width * 70 // 100))
+    inner_w = min(inner_w, width - 2)
+    view_h = max(1, min(len(items) or 1, max(1, height - 7)))
+    box_h = view_h + 5  # title + header + separator + items + footer + border
+    top = max(0, (height - box_h) // 2)
+    left = max(0, (width - inner_w) // 2)
+
+    def put(row, col, text, attr=0):
+        try:
+            stdscr.addstr(row, col, text[:width - col], attr)
+        except curses.error:
+            pass
+
+    put(top, left, "\u250c" + " RECENT FILES ".center(inner_w - 2)[:inner_w - 2]
+        + "\u2510", curses.A_REVERSE)
+    put(top + 1, left, "\u2502", curses.A_DIM)
+    put(top + 1, left + 1, f" {len(items)} recent file(s) "
+        + " " * max(0, inner_w - 2 - len(f" {len(items)} recent file(s) ")),
+        curses.A_DIM)
+    put(top + 1, left + inner_w - 1, "\u2502", curses.A_DIM)
+    sep = "\u251c" + "\u2500" * max(0, inner_w - 2) + "\u2524"
+    put(top + 2, left, sep, curses.A_DIM)
+    offset = 0
+    if items:
+        offset = min(max(picker.selected - (view_h - 1), 0),
+                     max(len(items) - view_h, 0))
+    for i in range(view_h):
+        index = offset + i
+        if index < len(items):
+            text = items[index]
+            attr = curses.A_REVERSE if index == picker.selected else 0
+        else:
+            text = "No recent files" if not items else ""
+            attr = 0
+        put(top + 3 + i, left, "\u2502", curses.A_DIM)
+        put(top + 3 + i, left + 1,
+            " " + text[:inner_w - 3]
+            + " " * max(0, inner_w - 3 - min(len(text), inner_w - 3)), attr)
+        put(top + 3 + i, left + inner_w - 1, "\u2502", curses.A_DIM)
+    bottom = top + box_h - 1
+    put(top + 3 + view_h, left + 1,
+        " \u2191/\u2193 select \u2192 Enter open \u2192 Esc back", curses.A_DIM)
+    put(bottom, left, "\u2514" + "\u2500" * max(0, inner_w - 2) + "\u2518", curses.A_DIM)
 
 
 def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
