@@ -996,18 +996,26 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 stdscr.timeout(-1)
                 status = ""
             elif key == "\n" or key == "\r":
-                path = quick_open.selected_path()
+                path = quick_open.selected_location()
                 if path:
                     quick_open.close()
                     stdscr.timeout(-1)
-                    language, status = open_file_path(
-                        stdscr, buf, explorer, path,
-                        render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
-                    )
-                    if status.startswith("Opened"):
-                        buf.configure_for_language(language)
-                        explorer.active = False
-                        recent.add_recent(path)
+                    if os.path.isdir(path):
+                        explorer.set_root(path)
+                        explorer.visible = True
+                        explorer.active = True
+                        root_dir = path
+                        quick_open = QuickOpen(root_dir, show_recent_on_empty=False)
+                        status = f"Project root: {path}"
+                    else:
+                        language, status = open_file_path(
+                            stdscr, buf, explorer, path,
+                            render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
+                        )
+                        if status.startswith("Opened"):
+                            buf.configure_for_language(language)
+                            explorer.active = False
+                            recent.add_recent(path)
                 else:
                     quick_open.close()
                     stdscr.timeout(-1)
@@ -2185,7 +2193,12 @@ def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
                 msg = " Updating results..."
             else:
                 direct = qo._direct_candidate()
-                msg = " Press Enter to open typed path" if direct else " No matches"
+                if direct:
+                    msg = " Press Enter to open typed path"
+                elif qo._direct_folder():
+                    msg = " Press Enter to open this folder as project root"
+                else:
+                    msg = " No matches"
             put(top + 3, left + 1, msg, curses.A_DIM)
         else:
             msg = " Recent files" if qo.show_recent_on_empty else " Type to search files..."

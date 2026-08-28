@@ -373,22 +373,32 @@ class QuickOpen:
             if total:
                 self.selected_idx = max(0, min(self.selected_idx + dy, total - 1))
 
-    def _direct_candidate(self) -> str | None:
-        """Resolve an explicitly typed existing path without waiting for indexing."""
+    def _typed_paths(self) -> list[str]:
+        """Resolve the typed query into candidate absolute paths."""
         query = self.query.strip()
         if not query:
-            return None
-
-        candidates: list[str] = []
+            return []
         if os.path.isabs(query):
-            candidates.append(os.path.abspath(os.path.expanduser(query)))
-        else:
-            candidates.append(os.path.abspath(os.path.join(self.root_dir, query)))
-            if os.sep not in query:
-                candidates.append(os.path.abspath(os.path.expanduser("~") + os.sep + query))
+            return [os.path.abspath(os.path.expanduser(query))]
+        candidates = [os.path.abspath(os.path.join(self.root_dir, query))]
+        if os.sep not in query:
+            candidates.append(os.path.abspath(os.path.expanduser("~") + os.sep + query))
+        return candidates
 
-        for path in candidates:
+    def _direct_candidate(self) -> str | None:
+        """Resolve an explicitly typed existing path without waiting for indexing."""
+        for path in self._typed_paths():
             if not os.path.isfile(path):
+                continue
+            if _is_excluded(path, _normalize_excludes(self.exclude_roots)):
+                continue
+            return path
+        return None
+
+    def _direct_folder(self) -> str | None:
+        """Resolve an explicitly typed existing directory (e.g. to open as root)."""
+        for path in self._typed_paths():
+            if not os.path.isdir(path):
                 continue
             if _is_excluded(path, _normalize_excludes(self.exclude_roots)):
                 continue
@@ -400,8 +410,23 @@ class QuickOpen:
         with self._lock:
             if 0 <= self.selected_idx < len(self.results):
                 return self.results[self.selected_idx][1]
-            direct = self._direct_candidate()
-            return direct
+            return self._direct_candidate()
+
+    def selected_location(self) -> str | None:
+        """Return the typed existing path (file or folder) when it resolves,
+        otherwise the selected fuzzy result.
+
+        An explicitly typed location wins over fuzzy subpath matches so that
+        entering a real path always opens that path rather than an unrelated
+        partial-match result.
+        """
+        with self._lock:
+            exact = self._direct_candidate() or self._direct_folder()
+            if exact:
+                return exact
+            if 0 <= self.selected_idx < len(self.results):
+                return self.results[self.selected_idx][1]
+            return None
 
     def get_display_items(self, limit: int = 20) -> list[tuple[str, bool]]:
         """Return display items without exposing a partially-written list."""

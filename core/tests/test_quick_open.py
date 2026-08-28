@@ -127,5 +127,94 @@ class TestQuickOpen(unittest.TestCase):
         self.assertIsNone(qo.selected_path())
 
 
+class TestDirectLocation(unittest.TestCase):
+    def setUp(self):
+        self._root = tempfile.mkdtemp(prefix="stdedit-qo-")
+        self._file = os.path.join(self._root, "sample.py")
+        with open(self._file, "w") as f:
+            f.write("x")
+        self.addCleanup(shutil.rmtree, self._root, ignore_errors=True)
+
+    def test_direct_folder_absolute(self):
+        qo = QuickOpen(self._root)
+        qo.open()
+        qo.update_query(self._root)
+        self.assertEqual(qo._direct_folder(), os.path.abspath(self._root))
+        self.assertIsNone(qo._direct_candidate())  # folder is not a file
+
+    def test_direct_folder_relative_to_root(self):
+        sub = os.path.join(self._root, "sub")
+        os.makedirs(sub)
+        qo = QuickOpen(self._root)
+        qo.open()
+        qo.update_query("sub")
+        self.assertEqual(qo._direct_folder(), sub)
+
+    def test_direct_folder_trailing_slash(self):
+        qo = QuickOpen(self._root)
+        qo.open()
+        qo.update_query(self._root + os.sep)
+        self.assertEqual(qo._direct_folder(), os.path.abspath(self._root))
+
+    def test_direct_folder_missing_gives_none(self):
+        qo = QuickOpen(self._root)
+        qo.open()
+        qo.update_query(os.path.join(self._root, "nope"))
+        self.assertIsNone(qo._direct_folder())
+        self.assertIsNone(qo._direct_candidate())
+
+    def test_direct_folder_excluded(self):
+        qo = QuickOpen(self._root, exclude_roots=[self._root])
+        qo.open()
+        qo.update_query(self._root)
+        self.assertIsNone(qo._direct_folder())
+
+    def test_direct_folder_none_on_empty_query(self):
+        qo = QuickOpen(self._root)
+        qo.open()
+        self.assertIsNone(qo._direct_folder())
+
+    def test_selected_location_file_takes_precedence(self):
+        qo = QuickOpen(self._root)
+        qo.open()
+        qo.update_query("sample")
+        deadline = __import__("time").time() + 2.0
+        while __import__("time").time() < deadline and not qo.results:
+            __import__("time").sleep(0.01)
+        self.assertEqual(qo.selected_location(), self._file)
+        qo.close()
+
+    def test_selected_location_falls_back_to_folder(self):
+        sub = os.path.join(self._root, "folder")
+        os.makedirs(sub)
+        qo = QuickOpen(self._root)
+        qo.open()
+        qo.update_query("folder")
+        self.assertEqual(qo.selected_location(), sub)
+
+    def test_selected_location_none_when_nothing_matches(self):
+        qo = QuickOpen(self._root)
+        qo.open()
+        qo.update_query("totally-absent")
+        self.assertIsNone(qo.selected_location())
+
+    def test_typed_location_beats_fuzzy_subpath_match(self):
+        unrelated = tempfile.mkdtemp(prefix="stdedit-qo-")
+        sub = os.path.join(unrelated, "opencodetest")
+        os.makedirs(sub)
+        self.addCleanup(shutil.rmtree, unrelated, ignore_errors=True)
+        with open(os.path.join(sub, "backend.xml"), "w") as f:
+            f.write("x")
+        qo = QuickOpen(unrelated)
+        qo.open()
+        qo.update_query("/tmp")
+        deadline = __import__("time").time() + 2.0
+        while __import__("time").time() < deadline and not qo.results:
+            __import__("time").sleep(0.01)
+        self.assertNotEqual(qo.selected_location(), os.path.join(sub, "backend.xml"))
+        self.assertTrue(os.path.isdir(qo.selected_location()))
+        qo.close()
+
+
 if __name__ == "__main__":
     unittest.main()

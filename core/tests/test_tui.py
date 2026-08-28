@@ -16,11 +16,13 @@ from stdedit.tui import (
     _draw_suggest_overlay,
     _fetch_ghost_text,
     _draw_settings_overlay,
+    _draw_quick_open_overlay,
     RecentPicker,
     _draw_recent_overlay,
 )
 from stdedit.buffer import Buffer
 from stdedit import suggest
+from stdedit.quick_open import QuickOpen
 
 import tempfile as _tempfile
 import pathlib as _pathlib
@@ -1253,6 +1255,56 @@ class TestDrawRecentOverlay(unittest.TestCase):
         texts = "".join(t for _, _, t, _ in s.calls)
         self.assertIn("/tmp/file9.txt", texts)
         self.assertNotIn("/tmp/file0.txt", texts)
+
+
+class TestDrawQuickOpenOverlay(unittest.TestCase):
+    class FakeScr:
+        def __init__(self):
+            self.calls = []
+
+        def getmaxyx(self):
+            return (24, 80)
+
+        def addstr(self, row, col, text, attr):
+            self.calls.append((row, col, text, attr))
+
+    def _qo(self, query, root):
+        qo = QuickOpen(root)
+        qo.visible = True
+        qo.query = query
+        qo.results = []
+        qo.selected_idx = 0
+        qo.loading = False
+        qo.scan_error = None
+        qo.capped = False
+        qo.scoring = False
+        return qo
+
+    def test_folder_message_when_typed_dir_matches(self):
+        qo = self._qo(_tempfile.mkdtemp(prefix="stdedit-qo-"), "/tmp")
+        s = self.FakeScr()
+        _draw_quick_open_overlay(s, qo)
+        texts = "".join(t for _, _, t, _ in s.calls)
+        self.assertIn("open this folder as project root", texts)
+
+    def test_file_message_when_typed_file_matches(self):
+        d = _tempfile.mkdtemp(prefix="stdedit-qo-")
+        f = os.path.join(d, "target.py")
+        with open(f, "w") as fh:
+            fh.write("x")
+        qo = self._qo(f, d)
+        s = self.FakeScr()
+        _draw_quick_open_overlay(s, qo)
+        texts = "".join(t for _, _, t, _ in s.calls)
+        self.assertIn("open typed path", texts)
+        self.assertNotIn("as project root", texts)
+
+    def test_no_matches_message(self):
+        qo = self._qo("definitely-absent-xyz", "/tmp")
+        s = self.FakeScr()
+        _draw_quick_open_overlay(s, qo)
+        texts = "".join(t for _, _, t, _ in s.calls)
+        self.assertIn("No matches", texts)
 
 
 if __name__ == "__main__":
