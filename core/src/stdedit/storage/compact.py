@@ -8,7 +8,7 @@ the line(s) actually touched/rendered.
 from __future__ import annotations
 
 from array import array
-from typing import Iterator, List, Sequence, Union
+from typing import Iterator, Sequence, Union
 
 LineIndex = Union[int, slice]
 

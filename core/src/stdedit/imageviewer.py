@@ -86,12 +86,7 @@ def detect_format_path(path: str) -> Optional[str]:
 
 # ---- PNG decoder --------------------------------------------------------
 
-def _png_is_gray(code: int) -> bool:
-    return code in (0, 4)
 
-
-def _png_is_rgb(code: int) -> bool:
-    return code in (2, 6)
 
 
 def _png_is_palette(code: int) -> bool:

@@ -31,6 +31,7 @@ import os
 import sys
 import threading
 import time
+from typing import Optional, Tuple
 
 from .buffer import Buffer
 from .languages import schema
@@ -67,7 +68,6 @@ _COLOR_PAIRS = {
     "property": 10,
 }
 
-_PASTE_START = "\x1b[200~"
 _PASTE_END = "\x1b[201~"
 
 
@@ -131,14 +131,6 @@ def _settings_nav_indices(expanded: dict[str, bool]) -> list[int]:
         elif section is not None and expanded.get(section, False):
             result.append(i)
     return result
-
-
-def _settings_header_index(label: str) -> int:
-    """Return the LABELS index of the header row for *label*."""
-    for i, (key, l) in enumerate(settings.LABELS):
-        if key is None and l == label:
-            return i
-    return 0
 
 
 def _settings_display_rows(expanded: dict[str, bool]) -> list[tuple]:

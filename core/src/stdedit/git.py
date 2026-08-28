@@ -256,10 +256,7 @@ def switch_branch(path: str, branch: str) -> tuple[bool, str]:
     return ok, output
 
 
-def create_branch(path: str, branch: str) -> bool:
-    """Create a new branch from HEAD."""
-    r = _run(["checkout", "-b", branch], cwd=path)
-    return r is not None and r.returncode == 0
+
 
 
 # ------------------------------------------------------------------ #
@@ -276,23 +273,3 @@ def stash_pop(path: str) -> bool:
     """Pop the most recent stash."""
     r = _run(["stash", "pop"], cwd=path)
     return r is not None and r.returncode == 0
-
-
-# ------------------------------------------------------------------ #
-# Log
-# ------------------------------------------------------------------ #
-
-def get_log(path: str, count: int = 10) -> list[dict[str, str]]:
-    """Return recent commits as ``[{hash, message, author}]``."""
-    r = _run(
-        ["log", f"-{count}", "--format=%h|%s|%an"],
-        cwd=path,
-    )
-    if r is None or r.returncode != 0:
-        return []
-    result = []
-    for line in r.stdout.splitlines():
-        parts = line.split("|", 2)
-        if len(parts) == 3:
-            result.append({"hash": parts[0], "message": parts[1], "author": parts[2]})
-    return result

@@ -9,12 +9,12 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from typing import Iterable
+
 
 import curses
 
 from . import recent
-from .perf import format_bytes
+
 
 
 GREEN_PAIR = 30

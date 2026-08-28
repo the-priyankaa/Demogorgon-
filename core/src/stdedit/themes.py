@@ -624,9 +624,6 @@ THEME_ORDER = [
     "ayu",
 ]
 
-_MISSING_ROLES = []
-
-
 def theme_names() -> list[str]:
     """Return theme display names in stable order."""
     return [THEMES[t]["name"] for t in THEME_ORDER]
@@ -664,11 +661,7 @@ def sanitize_theme_key(name: str) -> str:
     return f"theme_{safe}"
 
 
-def active_theme_name() -> str:
-    """Return display name of the current theme (without importing isolated
-    internals, reads straight from the settings radio state via callers)."""
-    from . import settings
-    return settings.get_active_theme_name() or "default"
+
 
 
 def apply_theme(name: str = "default") -> None:

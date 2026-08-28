@@ -158,26 +158,3 @@ def get_completion(
         )
     except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError, KeyError):
         return None
-
-
-# ------------------------------------------------------------------ #
-# Ghost-text display helpers
-# ------------------------------------------------------------------ #
-
-def render_ghost_line(
-    line: str,
-    scroll_x: int,
-    max_width: int,
-    ghost_color_pair: int,
-) -> tuple[str, int]:
-    """Render a single ghost-text line for curses display.
-
-    Returns ``(display_string, curses_attribute)``.  The caller adds this
-    at the correct screen position.
-    """
-    visible = line[scroll_x:scroll_x + max_width]
-    return visible, curses.color_pair(ghost_color_pair) | curses.A_DIM if curses else 0
-
-
-# Avoid import at module level — curses may not be available in tests
-import curses  # noqa: E402

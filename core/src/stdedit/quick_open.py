@@ -167,12 +167,7 @@ def _fuzzy_search_lowered(
     return scored[:limit]
 
 
-def get_recent_matches(query: str, limit: int = 5) -> List[Tuple[float, str]]:
-    """Score recent files against *query* and return top matches."""
-    if not query:
-        return []
-    existing = [p for p in recent.get_recent() if os.path.isfile(p)]
-    return fuzzy_search(query, existing, limit=limit)
+
 
 
 class QuickOpen:

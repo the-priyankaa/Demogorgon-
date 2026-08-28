@@ -6,7 +6,7 @@ with color-coded added/removed lines inside the curses TUI.
 from __future__ import annotations
 
 import curses
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 # Color pair IDs (must not collide with other modules)
 _PAIR_DIFF_ADD = 20

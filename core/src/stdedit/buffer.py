@@ -22,7 +22,7 @@ from .imageviewer import detect_format_path
 DEFAULT_LARGE_FILE_BYTES = 8 * 1024 * 1024
 BRACKET_PAIRS = {"(": ")", "[": "]", "{": "}"}
 CLOSING_TO_OPENING = {v: k for k, v in BRACKET_PAIRS.items()}
-_QUOTES = {"\"", "\'"}
+
 
 _COALESCE_ACTIONS = {"insert_char", "backspace_char", "delete_char"}
 
