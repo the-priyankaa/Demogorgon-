@@ -6,7 +6,7 @@ Zero-dependency terminal text editor. Python stdlib only.
 
 ![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue)
 ![Zero Deps](https://img.shields.io/badge/deps-zero-brightgreen)
-![Tests](https://img.shields.io/badge/tests-524-passing)
+![Tests](https://img.shields.io/badge/tests-584-passing)
 ![Version](https://img.shields.io/badge/version-0.1.0-orange)
 
 ## Quick Start
@@ -52,7 +52,7 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 - Quick Open (`Ctrl-O`): fuzzy file search — background indexing **and** background result matching, home-directory search from the dashboard, recent-files fallback
 - Diff Viewer: scrollable unified diff with syntax colors
 - Image Viewer: opens automatically when you open an image file — PNG / BMP / PPM render in-terminal via half-block truecolor (any 256-color terminal); JPEG / GIF / WebP / HEIC / SVG and more stream full-screen through the Kitty / iTerm2 inline-graphics protocol (raw bytes, terminal-native decoding)
-- Settings (`Ctrl-P`): auto-save mode, theme, font family selection
+- Settings (`Ctrl-P`): auto-save mode, theme, font family, suggestions (off / auto-suggest / AI inline)
 - Help (`Ctrl-H` / `F1`): scrollable keybinding reference
 
 **Git & GitHub**
@@ -62,7 +62,20 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 - Issues (list / close / reopen) via `gh` CLI
 - Pull requests (list / checkout / merge) via `gh` CLI
 
-**AI Completions** — Codeium inline ghost-text suggestions (opt-in via API key)
+**Auto-suggest & AI Completions**
+- Local suggestion popup (VS Code-style): auto-triggers while typing an
+  identifier and shows language keywords plus identifiers already in the
+  open file, ranked by keyword-priority then frequency. `Tab` / `Enter`
+  insert the highlighted candidate, `Esc` dismisses, `^`/`v` move the
+  selection. Select **Auto-suggest** in Settings (`Ctrl-P`), on top of the
+  default **Suggestions: off**.
+- Codeium AI inline ghost text (opt-in): dim suggestion shown at the cursor
+  after ~0.35s of idle typing; `Tab` accepts, `Esc` dismisses. Select
+  **AI inline (Codeium)** in Settings (`Ctrl-P`, default is off via
+  **Suggestions: off**).
+  Store your Codeium personal API key at
+  `~/.config/stdedit/codeium_key`; suggestions silently skip when the key
+  is missing or the API is unreachable.
 
 **Extensions** — Plugin system with `setup(api)` / `register(api)` lifecycle, 3 search paths, isolated error handling
 
@@ -95,6 +108,16 @@ Home / End          jump to line start / end
 " '                 auto-close quotes
 Ctrl-F              find text in the file
 Ctrl-R              replace all occurrences
+```
+
+### Auto-suggest
+
+```
+typing              while typing an identifier, matching keywords and
+                    document identifiers appear in a popup below the cursor
+^ / v               move popup selection (while the popup is open)
+Tab / Enter         insert the highlighted suggestion
+Esc                 dismiss the popup / inline ghost text
 ```
 
 ### Selection & Clipboard
@@ -295,10 +318,17 @@ make deps-fix       # auto-install missing helpers via detected package manager
 
 | File | Purpose |
 |------|---------|
-| `~/.config/stdedit/settings.json` | Editor settings (auto-save, theme, font family) |
+| `~/.config/stdedit/settings.json` | Editor settings (auto-save, theme, font family, auto-suggest toggles) |
 | `~/.config/stdedit/recent.json` | Recently opened files (max 50) |
+| `~/.config/stdedit/codeium_key` | Codeium personal API key (AI inline suggestions) |
 
 **Auto-save modes:** off (default), on idle (5s), periodic (30s), on every edit
+
+**Auto-suggest toggles:** the SUGGESTIONS section is a three-way radio
+group — exactly one option is active. `suggestions_off` (default on →
+suggestions disabled by default), `suggestions_on` (local keyword/identifier
+popup), and `codeium_on` (dim AI inline ghost text shown after a short pause
+while typing). Switching one option clears the others.
 
 **Themes:** default, Monokai, Dracula, Solarized Dark, Solarized Light, Nord, One Dark, Tokyo Night, Gruvbox Dark, Catppuccin Mocha, Rose Pine, GitHub Light, Zenburn, Everforest, Ayu. On 256-color terminals each theme uses its true palette; fewer colors fold tones to the closest base color.
 
@@ -352,7 +382,7 @@ def setup(api):
 | Command | Description |
 |---------|-------------|
 | `make run FILE=file.py` | Run the editor |
-| `make test` | Run all tests (524 tests) |
+| `make test` | Run all tests (584 tests) |
 | `make proof` | Verify zero dependencies |
 | `make clean` | Remove `__pycache__` and artifacts |
 

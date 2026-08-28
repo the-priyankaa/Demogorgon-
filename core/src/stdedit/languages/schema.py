@@ -35,11 +35,19 @@ TokenSpan = Tuple[int, int, str]  # start, end, token_type
 LANGUAGES: Dict[str, dict] = {
     "plaintext": {
         "extensions": [],
+        "keywords": [],
         "rules": [],
         "indent": {"size": 4},
     },
     "python": {
         "extensions": [".py", ".pyw"],
+        "keywords": [
+            "def", "class", "if", "elif", "else", "for", "while", "return",
+            "import", "from", "as", "with", "try", "except", "finally",
+            "raise", "yield", "lambda", "pass", "break", "continue", "and",
+            "or", "not", "in", "is", "None", "True", "False", "global",
+            "nonlocal", "assert", "del", "async", "await",
+        ],
         "indent": {"size": 4, "increase": r":\s*$"},
         "rules": [
             # Order matters: earlier rules win at the same start position.
@@ -57,6 +65,14 @@ LANGUAGES: Dict[str, dict] = {
     },
     "javascript": {
         "extensions": [".js", ".jsx", ".mjs"],
+        "keywords": [
+            "function", "const", "let", "var", "if", "else", "for", "while",
+            "do", "switch", "case", "default", "break", "continue", "return",
+            "try", "catch", "finally", "throw", "async", "await", "class",
+            "extends", "import", "export", "from", "as", "new", "this",
+            "super", "static", "get", "set", "typeof", "instanceof", "in",
+            "of", "delete", "void", "yield", "with",
+        ],
         "indent": {"size": 2, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
@@ -74,6 +90,17 @@ LANGUAGES: Dict[str, dict] = {
     },
     "typescript": {
         "extensions": [".ts", ".tsx"],
+        "keywords": [
+            "function", "const", "let", "var", "if", "else", "for", "while",
+            "do", "switch", "case", "default", "break", "continue", "return",
+            "try", "catch", "finally", "throw", "async", "await", "class",
+            "extends", "import", "export", "from", "as", "new", "this",
+            "super", "static", "get", "set", "typeof", "instanceof", "in",
+            "of", "delete", "void", "yield", "with", "interface", "type",
+            "enum", "namespace", "module", "declare", "abstract",
+            "implements", "public", "private", "protected", "readonly",
+            "override",
+        ],
         "indent": {"size": 2, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
@@ -94,6 +121,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "html": {
         "extensions": [".html", ".htm"],
+        "keywords": [],
         "indent": {"size": 2, "increase": r"<[^/!-][^>]*>\s*$", "decrease": r"</"},
         "rules": [
             ("comment", r"<!--.*?-->"),
@@ -104,6 +132,10 @@ LANGUAGES: Dict[str, dict] = {
     },
     "css": {
         "extensions": [".css", ".scss", ".sass"],
+        "keywords": [
+            "media", "import", "font-face", "keyframes", "charset",
+            "namespace", "supports", "page", "document",
+        ],
         "indent": {"size": 2, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"/\*.*?\*/|//.*"),
@@ -116,6 +148,14 @@ LANGUAGES: Dict[str, dict] = {
     },
     "c": {
         "extensions": [".c", ".h"],
+        "keywords": [
+            "auto", "break", "case", "char", "const", "continue", "default",
+            "do", "double", "else", "enum", "extern", "float", "for", "goto",
+            "if", "inline", "int", "long", "register", "restrict", "return",
+            "short", "signed", "sizeof", "static", "struct", "switch",
+            "typedef", "union", "unsigned", "void", "volatile", "while",
+            "_Bool", "_Complex", "_Imaginary",
+        ],
         "indent": {"size": 4, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
@@ -133,6 +173,24 @@ LANGUAGES: Dict[str, dict] = {
     },
     "cpp": {
         "extensions": [".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".h++", ".C"],
+        "keywords": [
+            "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand",
+            "bitor", "bool", "break", "case", "catch", "char", "char8_t",
+            "char16_t", "char32_t", "class", "compl", "concept", "const",
+            "consteval", "constexpr", "constinit", "const_cast", "continue",
+            "co_await", "co_return", "co_yield", "decltype", "default",
+            "delete", "do", "double", "dynamic_cast", "else", "enum",
+            "explicit", "export", "extern", "false", "float", "for", "friend",
+            "goto", "if", "inline", "int", "long", "mutable", "namespace",
+            "new", "noexcept", "not", "not_eq", "nullptr", "operator", "or",
+            "or_eq", "private", "protected", "public", "register",
+            "reinterpret_cast", "requires", "return", "short", "signed",
+            "sizeof", "static", "static_assert", "static_cast", "struct",
+            "switch", "template", "this", "thread_local", "throw", "true",
+            "try", "typedef", "typeid", "typename", "union", "unsigned",
+            "using", "virtual", "void", "volatile", "wchar_t", "while",
+            "xor", "xor_eq",
+        ],
         "indent": {"size": 4, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
@@ -156,6 +214,16 @@ LANGUAGES: Dict[str, dict] = {
     },
     "java": {
         "extensions": [".java"],
+        "keywords": [
+            "abstract", "assert", "boolean", "break", "byte", "case", "catch",
+            "char", "class", "const", "continue", "default", "do", "double",
+            "else", "enum", "extends", "final", "finally", "float", "for",
+            "goto", "if", "implements", "import", "instanceof", "int",
+            "interface", "long", "native", "new", "package", "private",
+            "protected", "public", "return", "short", "static", "strictfp",
+            "super", "switch", "synchronized", "this", "throw", "throws",
+            "transient", "try", "void", "volatile", "while",
+        ],
         "indent": {"size": 4, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
@@ -175,6 +243,14 @@ LANGUAGES: Dict[str, dict] = {
     },
     "rust": {
         "extensions": [".rs"],
+        "keywords": [
+            "as", "async", "await", "break", "const", "continue", "crate",
+            "dyn", "else", "enum", "extern", "false", "fn", "for", "if",
+            "impl", "in", "let", "loop", "match", "mod", "move", "mut",
+            "pub", "ref", "return", "self", "Self", "static", "struct",
+            "super", "trait", "true", "type", "unsafe", "use", "where",
+            "while",
+        ],
         "indent": {"size": 4, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
@@ -192,6 +268,12 @@ LANGUAGES: Dict[str, dict] = {
     },
     "go": {
         "extensions": [".go"],
+        "keywords": [
+            "break", "case", "chan", "const", "continue", "default", "defer",
+            "else", "fallthrough", "for", "func", "go", "goto", "if",
+            "import", "interface", "map", "package", "range", "return",
+            "select", "struct", "switch", "type", "var",
+        ],
         "indent": {"size": 4, "increase": r"\{\s*$", "decrease": r"\}"},
         "rules": [
             ("comment", r"//.*|/\*.*?\*/"),
@@ -210,6 +292,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "json": {
         "extensions": [".json"],
+        "keywords": ["true", "false", "null"],
         "indent": {"size": 2, "increase": r"[\[\{]\s*$", "decrease": r"[\]\}]"},
         "rules": [
             ("keyword", r"\b(?:true|false|null)\b"),
@@ -219,6 +302,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "yaml": {
         "extensions": [".yaml", ".yml"],
+        "keywords": ["true", "false", "null", "yes", "no", "on", "off"],
         "indent": {"size": 2, "increase": r":\s*$"},
         "rules": [
             ("comment", r"#.*"),
@@ -230,6 +314,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "markdown": {
         "extensions": [".md", ".markdown"],
+        "keywords": [],
         "indent": {"size": 4},
         "rules": [
             ("comment", r"<!--.*?-->"),
@@ -239,6 +324,13 @@ LANGUAGES: Dict[str, dict] = {
     },
     "shell": {
         "extensions": [".sh", ".bash", ".zsh"],
+        "keywords": [
+            "if", "then", "else", "elif", "fi", "case", "esac", "for",
+            "while", "do", "done", "in", "function", "return", "break",
+            "continue", "exit", "export", "declare", "local", "readonly",
+            "shift", "eval", "exec", "source", "alias", "unalias", "type",
+            "command",
+        ],
         "indent": {"size": 4, "increase": r"(?:;\s*$|then\s*$|do\s*$|in\s*$)"},
         "rules": [
             ("comment", r"#.*"),
@@ -254,6 +346,16 @@ LANGUAGES: Dict[str, dict] = {
     },
     "sql": {
         "extensions": [".sql"],
+        "keywords": [
+            "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
+            "CREATE", "ALTER", "DROP", "TABLE", "INDEX", "VIEW", "DATABASE",
+            "SCHEMA", "PRIMARY", "FOREIGN", "KEY", "CONSTRAINT", "NULL",
+            "NOT", "AND", "OR", "IN", "LIKE", "BETWEEN", "JOIN", "LEFT",
+            "RIGHT", "INNER", "OUTER", "ON", "AS", "GROUP", "BY", "ORDER",
+            "HAVING", "LIMIT", "OFFSET", "UNION", "ALL", "DISTINCT",
+            "EXISTS", "CASE", "WHEN", "THEN", "ELSE", "END", "BEGIN",
+            "COMMIT", "ROLLBACK", "TRANSACTION",
+        ],
         "indent": {"size": 4},
         "rules": [
             ("comment", r"--.*|/\*.*?\*/"),
@@ -273,6 +375,7 @@ LANGUAGES: Dict[str, dict] = {
     },
     "xml": {
         "extensions": [".xml", ".svg", ".xhtml"],
+        "keywords": [],
         "indent": {"size": 2, "increase": r"<[^/!-][^>]*>\s*$", "decrease": r"</"},
         "rules": [
             ("comment", r"<!--.*?-->"),
@@ -331,6 +434,11 @@ LANGUAGE_LABELS: Dict[str, str] = {
 def language_label(language: str) -> str:
     """Return the display name for a language id ('python' -> 'Python')."""
     return LANGUAGE_LABELS.get(language, "Text")
+
+
+def language_keywords(language: str) -> List[str]:
+    """Return the suggestion keywords for *language* (possibly empty)."""
+    return list(LANGUAGES.get(language, {}).get("keywords", []))
 
 
 def tokenize(line: str, language: str) -> List[TokenSpan]:

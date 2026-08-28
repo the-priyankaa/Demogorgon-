@@ -33,6 +33,9 @@ _DEFAULTS: dict[str, bool] = {
     "auto_save_idle": False,
     "auto_save_periodic": False,
     "auto_save_on_edit": False,
+    "suggestions_off": True,
+    "suggestions_on": False,
+    "codeium_on": False,
 }
 for i, fk in enumerate(_font_keys):
     _DEFAULTS[fk] = (i == 0)
@@ -55,12 +58,18 @@ LABELS.append((None, ""))
 LABELS.append((None, "FONT FAMILY"))
 for fk, fl in zip(_font_keys, _font_labels):
     LABELS.append((fk, fl))
+LABELS.append((None, ""))
+LABELS.append((None, "SUGGESTIONS"))
+LABELS.append(("suggestions_off", "Suggestions: off"))
+LABELS.append(("suggestions_on", "Auto-suggest"))
+LABELS.append(("codeium_on", "AI inline (Codeium)"))
 
 # Build RADIO_GROUPS
 RADIO_GROUPS: dict[str, list[str]] = {
     "auto_save": list(_AUTO_SAVE_KEYS),
     "theme": list(_theme_keys),
     "font_family": list(_font_keys),
+    "suggestions": ["suggestions_off", "suggestions_on", "codeium_on"],
 }
 
 # Build reverse lookup: key -> group name

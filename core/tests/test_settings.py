@@ -201,7 +201,62 @@ class TestRadioGroup(unittest.TestCase):
         self.assertTrue(settings.is_radio_key("auto_save_idle"))
         self.assertTrue(settings.is_radio_key("auto_save_periodic"))
         self.assertTrue(settings.is_radio_key("auto_save_on_edit"))
+        self.assertTrue(settings.is_radio_key("suggestions_off"))
+        self.assertTrue(settings.is_radio_key("suggestions_on"))
+        self.assertTrue(settings.is_radio_key("codeium_on"))
         self.assertFalse(settings.is_radio_key("no_such_key"))
+
+
+class TestSuggestionsRadioGroup(unittest.TestCase):
+    """SUGGESTIONS options are mutually exclusive and default to Off."""
+
+    def setUp(self):
+        settings._settings = dict(settings._DEFAULTS)
+        self._tmp = Path(tempfile.mkdtemp()) / "settings.json"
+        self._mgr = mock.patch.object(settings, "CONFIG_FILE", self._tmp)
+        self._mgr.start()
+
+    def tearDown(self):
+        self._mgr.stop()
+
+    def test_default_is_off(self):
+        self.assertTrue(settings.get("suggestions_off"))
+        self.assertFalse(settings.get("suggestions_on"))
+        self.assertFalse(settings.get("codeium_on"))
+
+    def test_enabling_auto_suggest_clears_others(self):
+        settings.toggle_radio("suggestions_on")
+        self.assertTrue(settings.get("suggestions_on"))
+        self.assertFalse(settings.get("suggestions_off"))
+        self.assertFalse(settings.get("codeium_on"))
+
+    def test_enabling_codeium_clears_others(self):
+        settings.toggle_radio("codeium_on")
+        self.assertTrue(settings.get("codeium_on"))
+        self.assertFalse(settings.get("suggestions_off"))
+        self.assertFalse(settings.get("suggestions_on"))
+
+    def test_switching_keeps_exactly_one_on(self):
+        settings.toggle_radio("suggestions_on")
+        settings.toggle_radio("codeium_on")
+        active = [k for k in ("suggestions_off", "suggestions_on", "codeium_on")
+                  if settings.get(k)]
+        self.assertEqual(active, ["codeium_on"])
+
+    def test_toggling_active_option_back_to_off(self):
+        settings.toggle_radio("suggestions_on")
+        settings.toggle_radio("suggestions_on")
+        self.assertFalse(any(settings.get(k) for k in
+                             ("suggestions_off", "suggestions_on", "codeium_on")))
+
+    def test_load_normalizes_all_three_on(self):
+        settings._settings = {"suggestions_off": True, "suggestions_on": True,
+                              "codeium_on": True}
+        settings._enforce_radio_groups()
+        self.assertEqual(
+            [k for k in ("suggestions_off", "suggestions_on", "codeium_on")
+             if settings._settings.get(k)],
+            ["suggestions_off"])
 
     def test_enforce_on_load_fixes_legacy_multi(self):
         """Legacy config with multiple ON → load keeps only the first."""

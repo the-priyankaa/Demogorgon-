@@ -29,6 +29,7 @@ from __future__ import annotations
 import curses
 import os
 import sys
+import threading
 import time
 
 from .buffer import Buffer
@@ -50,6 +51,8 @@ from . import dashboard
 from . import themes
 from . import imageviewer
 from . import pickdir
+from . import suggest
+from . import codeium
 
 _COLOR_PAIRS = {
     "keyword": 1,
@@ -475,6 +478,29 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     dashboard_selected = 0
     dashboard_started = time.perf_counter()
     dashboard_message = ""
+    sug = suggest.Suggestor()
+    sug_words: "object" = {}
+    sug_fp = None
+    ghost = None
+    ghost_anchor = (-1, -1)
+    ghost_busy = False
+    last_buffer_change_at = time.monotonic()
+
+    def _ghost_run() -> None:
+        nonlocal ghost, ghost_anchor, ghost_busy
+        try:
+            result = _fetch_ghost_text(editor.buffer)
+        except Exception:
+            result = None
+        if result is not None:
+            if (result.range_start_y, result.range_start_x) == (
+                editor.buffer.cursor_y, editor.buffer.cursor_x):
+                ghost = result
+                ghost_anchor = (result.range_start_y, result.range_start_x)
+            else:
+                ghost = None
+                ghost_anchor = (-1, -1)
+        ghost_busy = False
     while True:
         frame_started = meter.frame_start()
         if dashboard_active:
@@ -719,6 +745,14 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         if quick_open.visible:
             _draw_quick_open_overlay(stdscr, quick_open)
 
+        if sug.visible and not (show_settings or show_help
+                                or explorer.active or image_view_active):
+            _draw_suggest_overlay(stdscr, sug, buf, left_offset, gutter_width,
+                                  text_width, height, width)
+        if ghost is not None and (buf.cursor_y, buf.cursor_x) == ghost_anchor:
+            _draw_ghost(stdscr, buf, ghost, left_offset, gutter_width,
+                        text_width)
+
         stdscr.move(
             buf.cursor_y - buf.scroll_y,
             left_offset + gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
@@ -728,8 +762,19 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         status = ""
 
         _prev_modified = buf.modified
+        _editor_idle = not (explorer.active or show_settings or show_help
+                            or quick_open.visible or image_view_active)
+        if settings.get("codeium_on"):
+            stdscr.timeout(350 if _editor_idle else 50)
         key = _get_key(stdscr)
         if key is None:
+            # Inline-suggestion debounce: fetch when idle for >= 0.35s.
+            if (_editor_idle and not ghost_busy
+                    and time.monotonic() - last_buffer_change_at >= 0.35
+                    and _ghost_wanted(buf)):
+                ghost_busy = True
+                threading.Thread(
+                    target=_ghost_run, args=(), daemon=True).start()
             continue
 
         # Check auto-save conditions on every key event.
@@ -1213,6 +1258,40 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 status = "Source Control closed"
             continue
 
+        if sug.visible:
+            if key in (curses.KEY_UP,):
+                sug.move(-1)
+                status = ""
+                continue
+            if key in (curses.KEY_DOWN,):
+                sug.move(1)
+                status = ""
+                continue
+            if key in ("\t", "\n", "\r"):
+                suffix = sug.accept_suffix()
+                sug.close()
+                if suffix:
+                    _insert_text(buf, suffix)
+                    status = "Inserted suggestion"
+                else:
+                    status = ""
+                ghost = None
+                continue
+            if key == "\x1b":
+                sug.close()
+                status = ""
+                continue
+        elif ghost is not None and (buf.cursor_y, buf.cursor_x) == ghost_anchor:
+            if key == "\t":
+                _insert_text(buf, ghost.text)
+                status = "Accepted AI suggestion"
+                ghost = None
+                continue
+            if key == "\x1b":
+                ghost = None
+                status = ""
+                continue
+
         if key == "\x05":  # Ctrl-E - toggle explorer
             if not explorer.visible:
                 # Hidden → show and activate
@@ -1358,6 +1437,24 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 buf.save()
                 _last_save_time = time.time()
                 status = "Auto-saved"
+
+        # Keep the suggest popup & inline ghost in sync with the buffer.
+        if not isinstance(key, tuple):
+            fp = _lines_fingerprint(buf.lines)
+            if fp != sug_fp:
+                sug_fp = fp
+                if isinstance(key, str) or key in (curses.KEY_BACKSPACE,
+                                                   curses.KEY_DC):
+                    ghost = None
+                    last_buffer_change_at = time.monotonic()
+                sug_words = suggest.identifier_words(buf.lines)
+            start, prefix = suggest.word_at(buf.current_line, buf.cursor_x)
+            if (settings.get("suggestions_on") and prefix
+                    and not (explorer.active or show_settings or show_help
+                             or quick_open.visible or image_view_active)):
+                sug.open(language, sug_words, prefix)
+            else:
+                sug.close()
 
 
 def line_number_width(line_count: int) -> int:
@@ -1762,6 +1859,130 @@ def _draw_help_overlay(stdscr, lines, offset=0):
     if offset + view_h < body_h:
         put(top + box_h - 1, left + inner_w - 1, "\u25bc",
             curses.A_REVERSE)
+
+
+# ------------------------------------------------------------------ #
+# Auto-suggest (popup + inline ghost text)
+# ------------------------------------------------------------------ #
+
+
+def _insert_text(buf, text: str) -> None:
+    """Insert possibly multi-line *text* at the cursor (one checkpoint)."""
+    if not text:
+        return
+    buf._checkpoint_if_needed("inline_suggest")
+    x0 = buf.cursor_x
+    original_tail = buf.lines[buf.cursor_y][x0:]
+    parts = text.split("\n")
+    if len(parts) == 1:
+        buf.lines[buf.cursor_y] = (buf.lines[buf.cursor_y][:x0]
+                                   + parts[0] + original_tail)
+        buf.cursor_x = x0 + len(parts[0])
+    else:
+        buf.lines[buf.cursor_y] = buf.lines[buf.cursor_y][:x0] + parts[0]
+        for i in range(1, len(parts)):
+            row = parts[i] if i < len(parts) - 1 else parts[i] + original_tail
+            buf.lines.insert(buf.cursor_y + i, row)
+        buf.cursor_y += len(parts) - 1
+        buf.cursor_x = len(parts[-1])
+    buf._set_content_chars(buf._content_chars + len(text))
+    buf.modified = True
+
+
+def _draw_suggest_overlay(stdscr, sug, buf, left_offset, gutter_width,
+                          text_width, height, width) -> None:
+    """Draw the auto-suggest popup anchored near the cursor (or above it)."""
+    items = sug.candidates
+    if not items:
+        return
+    show = len(items)
+    inner_w = max(26, min(40, max(0, width // 3)))
+    cursor_row = buf.cursor_y - buf.scroll_y
+    cursor_col = left_offset + gutter_width + (buf.cursor_x - buf.scroll_x)
+    box_h = show + 2
+    top = cursor_row + 1
+    if top + box_h > height - 1:
+        top = max(0, cursor_row - box_h)
+    left = min(max(0, cursor_col), max(0, width - inner_w - 1))
+
+    def put(row, col, text, attr=0):
+        try:
+            stdscr.addstr(row, col, text[: max(0, width - col)], attr)
+        except curses.error:
+            pass
+
+    put(top, left, "\u250c" + "\u2500" * (inner_w - 1) + "\u2510", curses.A_REVERSE)
+    for i, item in enumerate(items):
+        sel = (i == sug.selected)
+        label = ("\u25b6 " if sel else "  ") + item
+        attr = curses.A_REVERSE if sel else 0
+        put(top + 1 + i, left, (label + " " * inner_w)[:inner_w + 1], attr)
+    hint = " Tab/Enter accept  Esc close "
+    pad = inner_w - 1 - len(hint)
+    if pad >= 0:
+        line = ("\u2514" + "\u2500" * max(0, pad // 2) + hint
+                + "\u2500" * (pad - pad // 2) + "\u2518")
+    else:
+        line = "\u2514" + hint[:max(0, inner_w - 1)] + "\u2518"
+    put(top + show + 1, left, line)
+
+
+def _draw_ghost(stdscr, buf, ghost, left_offset, gutter_width, text_width) -> None:
+    """Render dim inline-suggestion text immediately after the cursor."""
+    if buf.cursor_y != ghost.range_start_y or buf.cursor_x != ghost.range_start_x:
+        return
+    if buf.cursor_x < len(buf.current_line):
+        return
+    row = buf.cursor_y - buf.scroll_y
+    col = left_offset + gutter_width + (buf.cursor_x - buf.scroll_x)
+    if col < 0:
+        return
+    first = ghost.text.split("\n", 1)[0]
+    avail = max(0, text_width - (buf.cursor_x - buf.scroll_x))
+    slice_text = first[:avail]
+    if not slice_text:
+        return
+    try:
+        stdscr.addstr(row, col, slice_text, curses.A_DIM)
+    except curses.error:
+        pass
+
+
+def _ghost_wanted(buf) -> bool:
+    """True when an inline suggestion makes sense at the cursor."""
+    line = buf.current_line
+    x = buf.cursor_x
+    if x == 0:
+        return True
+    if x >= len(line):
+        return True
+    prev = line[x - 1]
+    return not (prev.isalnum() or prev == "_")
+
+
+def _lines_fingerprint(lines) -> tuple:
+    """Cheap digest to detect edits inside the scannable window."""
+    n = min(len(lines), suggest.DOC_SCAN_LIMIT)
+    total = 0
+    for i in range(n):
+        total += len(lines[i])
+    return (len(lines), total)
+
+
+def _fetch_ghost_text(buf) -> "object | None":
+    """Fetch an inline suggestion for the buffer (test hook honored)."""
+    fake = os.environ.get("STDEDIT_FAKE_GHOST")
+    if fake is not None:
+        if fake == "none":
+            return None
+        if buf is None:
+            return codeium.Completion(fake)
+        return codeium.Completion(fake, buf.cursor_y, buf.cursor_x)
+    key = codeium.get_api_key()
+    if not key:
+        return None
+    return codeium.get_completion(
+        buf.lines, buf.cursor_y, buf.cursor_x, buf.filename or "", key)
 
 
 def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:

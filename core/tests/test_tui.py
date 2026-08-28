@@ -8,7 +8,16 @@ from stdedit.tui import (
     is_help_toggle,
     line_number_width,
     format_status_bar,
+    _lines_fingerprint,
+    _insert_text,
+    _ghost_wanted,
+    _draw_ghost,
+    _draw_suggest_overlay,
+    _fetch_ghost_text,
+    _draw_settings_overlay,
 )
+from stdedit.buffer import Buffer
+from stdedit import suggest
 
 
 class TestLineNumbers(unittest.TestCase):
@@ -600,7 +609,7 @@ class TestSettingsDropdown(unittest.TestCase):
         headers = [i for i, (k, _) in enumerate(settings.LABELS)
                    if k is None and settings.LABELS[i][1]]
         self.assertEqual(_settings_nav_indices({}), headers)
-        self.assertEqual(len(headers), 3)  # AUTO-SAVE, THEME, FONT FAMILY
+        self.assertEqual(len(headers), 4)  # AUTO-SAVE, THEME, FONT FAMILY, SUGGESTIONS
 
     def test_expanded_section_shows_items(self):
         from stdedit.tui import _settings_nav_indices
@@ -627,7 +636,7 @@ class TestSettingsDropdown(unittest.TestCase):
         from stdedit.tui import _settings_display_rows
         rows = _settings_display_rows({})
         kinds = [r[0] for r in rows]
-        self.assertEqual(kinds, ["header", "header", "header"])
+        self.assertEqual(kinds, ["header", "header", "header", "header"])
         for r in rows:
             self.assertEqual(r[0], "header")
 
@@ -635,7 +644,7 @@ class TestSettingsDropdown(unittest.TestCase):
         from stdedit.tui import _settings_display_rows
         rows = _settings_display_rows({"THEME": True})
         kinds = [r[0] for r in rows]
-        self.assertEqual(kinds.count("header"), 3)
+        self.assertEqual(kinds.count("header"), 4)
         self.assertEqual(kinds.count("item"), len(self.settings._theme_keys))
         self.assertEqual(kinds.count("separator"), 1)
 
@@ -661,7 +670,8 @@ class TestSettingsAccordion(unittest.TestCase):
         from stdedit.tui import _settings_close_others
         exp = {"AUTO-SAVE": True, "THEME": True, "FONT FAMILY": True}
         _settings_close_others(exp, "THEME")
-        self.assertEqual(exp, {"AUTO-SAVE": False, "THEME": True, "FONT FAMILY": False})
+        self.assertEqual(exp, {"AUTO-SAVE": False, "THEME": True,
+                                 "FONT FAMILY": False, "SUGGESTIONS": False})
 
     def test_close_others_none_clears_all(self):
         from stdedit.tui import _settings_close_others
@@ -698,6 +708,52 @@ class TestSettingsAccordion(unittest.TestCase):
         exp["FONT FAMILY"] = True
         self.assertEqual(exp["THEME"], False)
         self.assertEqual(exp["FONT FAMILY"], True)
+
+    def test_suggestions_render_as_mutually_exclusive_radios(self):
+        """Expanded SUGGESTIONS shows (x)/ ( ) radio rows, Off on by default."""
+        from stdedit import settings
+        settings._settings = dict(settings._DEFAULTS)
+
+        class FakeScr:
+            def __init__(self):
+                self.lines = []
+
+            def getmaxyx(self):
+                return (24, 80)
+
+            def addstr(self, row, col, text, attr):
+                self.lines.append(text)
+
+        s = FakeScr()
+        _draw_settings_overlay(s, 0, 30, {"SUGGESTIONS": True})
+        joined = "\n".join(s.lines)
+        self.assertIn("(x) Suggestions: off", joined)
+        self.assertIn("( ) Auto-suggest", joined)
+        self.assertIn("( ) AI inline (Codeium)", joined)
+
+    def test_suggestions_radio_marks_only_active(self):
+        """With Auto-suggest selected, only its radio row is marked (x)."""
+        from stdedit import settings
+        settings._settings["suggestions_off"] = False
+        settings._settings["suggestions_on"] = True
+        settings._settings["codeium_on"] = False
+
+        class FakeScr:
+            def __init__(self):
+                self.lines = []
+
+            def getmaxyx(self):
+                return (24, 80)
+
+            def addstr(self, row, col, text, attr):
+                self.lines.append(text)
+
+        s = FakeScr()
+        _draw_settings_overlay(s, 0, 30, {"SUGGESTIONS": True})
+        joined = "\n".join(s.lines)
+        self.assertIn("( ) Suggestions: off", joined)
+        self.assertIn("(x) Auto-suggest", joined)
+        self.assertIn("( ) AI inline (Codeium)", joined)
 
 
 class TestQuitDialog(unittest.TestCase):
@@ -800,6 +856,171 @@ class TestQuitDialog(unittest.TestCase):
         self.assertIn("[ Cancel ]", joined)
         self.assertIn("\u250c", joined)
         self.assertIn("\u2518", joined)
+
+
+class TestFingerprint(unittest.TestCase):
+    def test_changes_on_edit(self):
+        lines = ["foo", "bar baz"]
+        self.assertNotEqual(_lines_fingerprint(lines),
+                            _lines_fingerprint(lines + [""]))
+        self.assertEqual(_lines_fingerprint(lines),
+                         _lines_fingerprint(list(lines)))
+
+    def test_scannable_window_only(self):
+        base = [""] * 3000
+        a = _lines_fingerprint(base)
+        base[2999] = "changed"
+        self.assertEqual(a, _lines_fingerprint(base))
+
+
+class TestInsertText(unittest.TestCase):
+    def make_buffer(self, text="", row=0, col=0):
+        b = Buffer()
+        if text:
+            b.lines = text.split("\n")
+        b.cursor_y = row
+        b.cursor_x = col
+        return b
+
+    def test_single_line(self):
+        b = self.make_buffer("abc", 0, 1)
+        _insert_text(b, "XY")
+        self.assertEqual(b.lines[0], "aXYbc")
+        self.assertEqual((b.cursor_y, b.cursor_x), (0, 3))
+        self.assertTrue(b.modified)
+
+    def test_multi_line(self):
+        b = self.make_buffer("abc\ndef", 0, 1)
+        _insert_text(b, "X\nYZ")
+        self.assertEqual(list(b.lines), ["aX", "YZbc", "def"])
+        self.assertEqual((b.cursor_y, b.cursor_x), (1, 2))
+
+    def test_multi_line_empty_tail_preserved(self):
+        b = self.make_buffer("abc", 0, 3)
+        _insert_text(b, "1\n2\n3")
+        self.assertEqual(list(b.lines), ["abc1", "2", "3"])
+        self.assertEqual((b.cursor_y, b.cursor_x), (2, 1))
+
+    def test_empty_noop(self):
+        b = self.make_buffer("abc", 0, 1)
+        _insert_text(b, "")
+        self.assertEqual(list(b.lines), ["abc"])
+        self.assertFalse(b.modified)
+
+
+class TestGhostWanted(unittest.TestCase):
+    def make_buffer(self, text, col):
+        b = Buffer()
+        b.lines = [text]
+        b.cursor_y = 0
+        b.cursor_x = col
+        return b
+
+    def test_at_end_of_line(self):
+        self.assertTrue(_ghost_wanted(self.make_buffer("print", 5)))
+
+    def test_after_identifier_inside_line(self):
+        self.assertFalse(_ghost_wanted(self.make_buffer("print(x)", 3)))
+
+    def test_at_column_zero(self):
+        self.assertTrue(_ghost_wanted(self.make_buffer("xy", 0)))
+
+    def test_after_space(self):
+        self.assertTrue(_ghost_wanted(self.make_buffer("a b", 2)))
+
+
+class TestDrawGhost(unittest.TestCase):
+    class FakeScr:
+        def __init__(self):
+            self.calls = []
+
+        def addstr(self, row, col, text, attr):
+            self.calls.append((row, col, text, attr))
+
+    def make_ghost(self, text, y=0, x=0):
+        import stdedit.codeium as codeium
+        return codeium.Completion(text, y, x)
+
+    def test_draws_at_cursor_when_anchored(self):
+        g = self.make_ghost(" hello", 0, 1)
+        s = self.FakeScr()
+        b = Buffer()
+        b.lines = ["a"]
+        b.cursor_y = 0
+        b.cursor_x = 1
+        b.scroll_y = 0
+        b.scroll_x = 0
+        _draw_ghost(s, b, g, 0, 3, 40)
+        self.assertEqual(s.calls, [(0, 4, " hello", curses.A_DIM)])
+
+    def test_stale_anchor_skipped(self):
+        g = self.make_ghost(" hi", 0, 1)
+        s = self.FakeScr()
+        b = Buffer()
+        b.lines = ["aa"]
+        b.cursor_y = 0
+        b.cursor_x = 2
+        _draw_ghost(s, b, g, 0, 3, 40)
+        self.assertEqual(s.calls, [])
+
+    def test_mid_line_skipped(self):
+        g = self.make_ghost(" hi", 0, 1)
+        s = self.FakeScr()
+        b = Buffer()
+        b.lines = ["abc"]
+        b.cursor_x = 1
+        _draw_ghost(s, b, g, 0, 3, 40)
+        self.assertEqual(s.calls, [])
+
+
+class TestDrawSuggestOverlay(unittest.TestCase):
+    class FakeScr:
+        def __init__(self):
+            self.calls = []
+
+        def addstr(self, row, col, text, attr):
+            self.calls.append((row, col, text))
+
+    def test_renders_box_and_candidates(self):
+        s = self.FakeScr()
+        sug = suggest.Suggestor()
+        sug.open("python", {"gamma": 5}, "ga")
+        b = Buffer()
+        b.lines = ["ga"]
+        b.cursor_y = 0
+        b.cursor_x = 2
+        b.scroll_y = 0
+        b.scroll_x = 0
+        _draw_suggest_overlay(s, sug, b, 0, 3, 40, 24, 80)
+        joined = "".join(t for _, _, t in s.calls)
+        self.assertIn("\u250c", joined)
+        self.assertIn("\u2518", joined)
+        self.assertIn("gamma", joined)
+
+    def test_hidden_popup_noop(self):
+        s = self.FakeScr()
+        sug = suggest.Suggestor()
+        b = Buffer()
+        _draw_suggest_overlay(s, sug, b, 0, 3, 40, 24, 80)
+        self.assertEqual(s.calls, [])
+
+
+class TestFetchGhostText(unittest.TestCase):
+    def test_fake_ghost_string(self):
+        os.environ["STDEDIT_FAKE_GHOST"] = "import math"
+        try:
+            result = _fetch_ghost_text(None)
+            self.assertIsNotNone(result)
+            self.assertEqual(result.text, "import math")
+        finally:
+            del os.environ["STDEDIT_FAKE_GHOST"]
+
+    def test_fake_ghost_none(self):
+        os.environ["STDEDIT_FAKE_GHOST"] = "none"
+        try:
+            self.assertIsNone(_fetch_ghost_text(None))
+        finally:
+            del os.environ["STDEDIT_FAKE_GHOST"]
 
 
 if __name__ == "__main__":
