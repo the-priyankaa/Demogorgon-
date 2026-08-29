@@ -7,6 +7,8 @@ a repository.  No third-party dependencies — stdlib only.
 from __future__ import annotations
 
 import subprocess
+import tempfile
+import os
 from typing import Optional
 
 _TIMEOUT = 2  # seconds
@@ -214,9 +216,14 @@ def commit(path: str, message: str) -> bool:
     return r is not None and r.returncode == 0
 
 
-def push(path: str) -> tuple[bool, str]:
+def push(path: str, force_with_lease: bool = False, set_upstream: bool = False) -> tuple[bool, str]:
     """Push current branch. Returns (success, output)."""
-    r = _run(["push"], cwd=path)
+    args = ["push"]
+    if force_with_lease:
+        args.append("--force-with-lease")
+    if set_upstream:
+        args.extend(["-u", "origin"])
+    r = _run(args, cwd=path)
     if r is None:
         return False, "git not available"
     ok = r.returncode == 0
@@ -224,9 +231,14 @@ def push(path: str) -> tuple[bool, str]:
     return ok, output
 
 
-def pull(path: str) -> tuple[bool, str]:
+def pull(path: str, rebase: bool = False, ff_only: bool = False) -> tuple[bool, str]:
     """Pull from remote. Returns (success, output)."""
-    r = _run(["pull"], cwd=path)
+    args = ["pull"]
+    if rebase:
+        args.append("--rebase")
+    if ff_only:
+        args.append("--ff-only")
+    r = _run(args, cwd=path)
     if r is None:
         return False, "git not available"
     ok = r.returncode == 0
@@ -272,4 +284,219 @@ def stash(path: str) -> bool:
 def stash_pop(path: str) -> bool:
     """Pop the most recent stash."""
     r = _run(["stash", "pop"], cwd=path)
+    return r is not None and r.returncode == 0
+
+
+# ------------------------------------------------------------------ #
+# Branch management
+# ------------------------------------------------------------------ #
+
+def create_branch(path: str, branch_name: str, start_point: str | None = None) -> tuple[bool, str]:
+    """Create a new branch. Returns (success, output)."""
+    args = ["branch", branch_name]
+    if start_point:
+        args.append(start_point)
+    r = _run(args, cwd=path)
+    if r is None:
+        return False, "git not available"
+    ok = r.returncode == 0
+    output = r.stdout.strip() if ok else r.stderr.strip()
+    return ok, output
+
+
+def delete_branch(path: str, branch_name: str, force: bool = False) -> tuple[bool, str]:
+    """Delete a branch. Returns (success, output)."""
+    args = ["branch", "-d" if not force else "-D", branch_name]
+    r = _run(args, cwd=path)
+    if r is None:
+        return False, "git not available"
+    ok = r.returncode == 0
+    output = r.stdout.strip() if ok else r.stderr.strip()
+    return ok, output
+
+
+def rename_branch(path: str, old_name: str, new_name: str) -> tuple[bool, str]:
+    """Rename a branch. Returns (success, output)."""
+    r = _run(["branch", "-m", old_name, new_name], cwd=path)
+    if r is None:
+        return False, "git not available"
+    ok = r.returncode == 0
+    output = r.stdout.strip() if ok else r.stderr.strip()
+    return ok, output
+
+
+def publish_branch(path: str, branch_name: str | None = None) -> tuple[bool, str]:
+    """Push a branch to remote with upstream tracking (git push -u origin <branch>).
+    If branch_name is None, uses current branch.
+    Returns (success, output)."""
+    current = get_branch(path)
+    branch = branch_name or current
+    if not branch:
+        return False, "No branch to publish"
+    r = _run(["push", "-u", "origin", branch], cwd=path)
+    if r is None:
+        return False, "git not available"
+    ok = r.returncode == 0
+    output = r.stdout.strip() if ok else r.stderr.strip()
+    return ok, output
+
+
+def fetch_all(path: str, prune: bool = True) -> tuple[bool, str]:
+    """Fetch all remotes. Returns (success, output)."""
+    args = ["fetch", "--all"]
+    if prune:
+        args.append("--prune")
+    r = _run(args, cwd=path)
+    if r is None:
+        return False, "git not available"
+    ok = r.returncode == 0
+    output = r.stdout.strip() if ok else r.stderr.strip()
+    return ok, output
+
+
+def get_remote_branches(path: str) -> list[str]:
+    """Return list of remote branch names."""
+    r = _run(["branch", "-r", "--format=%(refname:short)"], cwd=path)
+    if r is None or r.returncode != 0:
+        return []
+    return [b.strip() for b in r.stdout.splitlines() if b.strip()]
+
+
+# ------------------------------------------------------------------ #
+# Hunks (for inline diff markers and hunk-level staging)
+# ------------------------------------------------------------------ #
+
+class GitHunk:
+    """A single diff hunk with line range information."""
+    __slots__ = ("old_start", "old_count", "new_start", "new_count",
+                 "lines", "header", "filepath", "staged")
+
+    def __init__(self, old_start: int, old_count: int, new_start: int, new_count: int,
+                 lines: list[str], header: str, filepath: str, staged: bool = False) -> None:
+        self.old_start = old_start          # Starting line in original file
+        self.old_count = old_count          # Number of lines in original
+        self.new_start = new_start          # Starting line in new file
+        self.new_count = new_count          # Number of lines in new
+        self.lines = lines                  # Diff lines (starting with +, -, or space)
+        self.header = header                # The @@ header line
+        self.filepath = filepath            # Path of the file
+        self.staged = staged                # Whether this hunk is from staged diff
+
+    def line_range(self) -> tuple[int, int]:
+        """Return (start_line, end_line) in the NEW file (1-indexed)."""
+        return (self.new_start, self.new_start + self.new_count - 1)
+
+    def contains_line(self, line_num: int) -> bool:
+        """Check if a line number (1-indexed in new file) falls in this hunk."""
+        start, end = self.line_range()
+        return start <= line_num <= end
+
+    def is_addition_only(self) -> bool:
+        """True if hunk only adds lines (no deletions)."""
+        return all(not l.startswith("-") for l in self.lines if l)
+
+    def is_deletion_only(self) -> bool:
+        """True if hunk only deletes lines (no additions)."""
+        return all(not l.startswith("+") for l in self.lines if l)
+
+
+def _parse_diff_hunks(diff_text: str, filepath: str, staged: bool = False) -> list[GitHunk]:
+    """Parse unified diff into GitHunk objects with line numbers."""
+    hunks: list[GitHunk] = []
+    lines = diff_text.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("@@"):
+            # Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
+            import re
+            match = re.match(r"@@\s+-(\d+),?(\d*)\s+\+(\d+),?(\d*)\s+@@", line)
+            if not match:
+                i += 1
+                continue
+            old_start = int(match.group(1))
+            old_count = int(match.group(2)) if match.group(2) else 1
+            new_start = int(match.group(3))
+            new_count = int(match.group(4)) if match.group(4) else 1
+
+            # Collect hunk lines
+            hunk_lines = [line]
+            i += 1
+            while i < len(lines) and not lines[i].startswith("@@"):
+                hunk_lines.append(lines[i])
+                i += 1
+
+            hunks.append(GitHunk(old_start, old_count, new_start, new_count,
+                                 hunk_lines[1:], line, filepath, staged))
+        else:
+            i += 1
+    return hunks
+
+
+def get_diff_hunks(path: str, filepath: str | None = None, staged: bool = False) -> list[GitHunk]:
+    """Return parsed hunks for a file (staged or unstaged)."""
+    diff_text = get_staged_diff(path, filepath) if staged else get_diff(path, filepath)
+    if not diff_text:
+        return []
+    return _parse_diff_hunks(diff_text, filepath or "", staged)
+
+
+def _apply_hunk(path: str, hunk: GitHunk, reverse: bool = False, cached: bool = False) -> bool:
+    """Apply or reverse a single hunk using git apply."""
+    # Create a minimal diff containing only this hunk
+    diff_lines = ["diff --git a/" + hunk.filepath + " b/" + hunk.filepath]
+    diff_lines.append("index 000000..111111 100644")
+    diff_lines.append("--- a/" + hunk.filepath)
+    diff_lines.append("+++ b/" + hunk.filepath)
+    diff_lines.append(hunk.header)
+    diff_lines.extend(hunk.lines)
+    diff_text = "\n".join(diff_lines) + "\n"
+
+    # Write to temp file and apply
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False) as f:
+        f.write(diff_text)
+        patch_file = f.name
+
+    try:
+        args = ["apply"]
+        if reverse:
+            args.append("--reverse")
+        if cached:
+            args.append("--cached")
+        args.append(patch_file)
+        r = _run(args, cwd=path)
+        return r is not None and r.returncode == 0
+    finally:
+        try:
+            os.unlink(patch_file)
+        except OSError:
+            pass
+
+
+def stage_hunk(path: str, hunk: GitHunk) -> bool:
+    """Stage a single hunk (apply to index)."""
+    if hunk.staged:
+        return True  # Already staged
+    return _apply_hunk(path, hunk, reverse=False, cached=True)
+
+
+def unstage_hunk(path: str, hunk: GitHunk) -> bool:
+    """Unstage a single hunk (reverse apply from index)."""
+    if not hunk.staged:
+        return True  # Not staged
+    return _apply_hunk(path, hunk, reverse=True, cached=True)
+
+
+def discard_hunk(path: str, hunk: GitHunk) -> bool:
+    """Discard a hunk from worktree (reverse apply)."""
+    if hunk.staged:
+        # If staged, we need to unstage first, then discard from worktree
+        if not _apply_hunk(path, hunk, reverse=True, cached=True):
+            return False
+    return _apply_hunk(path, hunk, reverse=True, cached=False)
+
+
+def discard_file(path: str, filepath: str) -> bool:
+    """Discard all changes to a file in worktree (git checkout -- <file>)."""
+    r = _run(["checkout", "--", filepath], cwd=path)
     return r is not None and r.returncode == 0

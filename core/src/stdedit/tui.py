@@ -45,6 +45,7 @@ from . import git
 from . import clipboard
 from .git_panel import GitPanel, init_panel_colors, draw_git_panel, git_panel_key
 from .diff_viewer import DiffViewer, init_diff_colors, draw_diff_overlay, diff_viewer_key
+from .git_gutter import GitGutter, get_gutter, init_gutter_colors, draw_gutter_mark, clear_gutter_cache
 from .quick_open import QuickOpen
 from . import recent
 from . import completion
@@ -53,7 +54,7 @@ from . import themes
 from . import imageviewer
 from . import pickdir
 from . import suggest
-from . import codeium
+from .import codeium
 from . import runner
 
 _COLOR_PAIRS = {
@@ -489,6 +490,7 @@ def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None
     _init_colors()
     init_panel_colors()
     init_diff_colors()
+    init_gutter_colors()
     _apply_font_family()
     _enable_bracketed_paste()
     curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
@@ -568,6 +570,12 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     ghost_anchor = (-1, -1)
     ghost_busy = False
     last_buffer_change_at = time.monotonic()
+
+    # Git gutter for inline diff markers
+    gutter: GitGutter | None = None
+    if buf.filename and git.is_git_repo(root_dir):
+        gutter = get_gutter(root_dir, buf.filename)
+        gutter.maybe_refresh(buf.get_text())
 
     def _ghost_run() -> None:
         nonlocal ghost, ghost_anchor, ghost_busy
@@ -761,14 +769,23 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                     meter.frame_end(frame_started)
                 continue
 
-        gutter_width = line_number_width(len(buf.lines)) + 2
+        gutter_width = line_number_width(len(buf.lines)) + 3  # +1 for git gutter marker
         text_width = max(1, width - left_offset - gutter_width - git_panel_width)
 
         buf.update_scroll(text_height, text_width)
 
+        # Refresh gutter if buffer changed
+        if gutter and buf.filename:
+            gutter.maybe_refresh(buf.get_text())
+
         for row in range(text_height):
             line_idx = buf.scroll_y + row
             _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width, x_offset=left_offset)
+            # Draw git gutter marker after line number
+            if gutter and line_idx < len(buf.lines):
+                mark = gutter.get_mark(line_idx + 1)  # 1-indexed
+                if mark:
+                    draw_gutter_mark(stdscr, row, left_offset + line_number_width(len(buf.lines)) + 1, mark)
             if line_idx >= len(buf.lines):
                 continue
             line = buf.lines[line_idx]

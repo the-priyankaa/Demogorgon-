@@ -10,13 +10,14 @@ Roles:
 - ``git``: git panel staged/unstaged/header pairs plus the 7 status
   letters (M/A/D/?/R/C/U).
 - ``diff``: diff viewer add/del/hunk/header pairs.
+- ``gutter``: inline git gutter markers (added/modified/deleted).
 """
 
 from __future__ import annotations
 
 import curses
 
-# Pair numbers must stay in sync with tui / git_panel / diff_viewer.
+# Pair numbers must stay in sync with tui / git_panel / diff_viewer / git_gutter.
 _PAIR_SYNTAX = {
     "keyword": 1,
     "string": 2,
@@ -41,6 +42,12 @@ _PAIR_DIFF = {
     "del": 21,
     "hunk": 22,
     "header": 23,
+}
+
+_PAIR_GUTTER = {
+    "added": 50,
+    "modified": 51,
+    "deleted": 52,
 }
 
 _16_COLOR_MAP = {
@@ -140,6 +147,11 @@ THEMES: dict[str, dict] = {
             "hunk": (6, -1),
             "header": (3, -1),
         },
+        "gutter": {
+            "added": (2, -1),
+            "modified": (3, -1),
+            "deleted": (1, -1),
+        },
     },
     "monokai": {
         "name": "Monokai",
@@ -172,6 +184,11 @@ THEMES: dict[str, dict] = {
             "del": (197, -1),
             "hunk": (81, -1),
             "header": (221, -1),
+        },
+        "gutter": {
+            "added": (148, -1),
+            "modified": (221, -1),
+            "deleted": (197, -1),
         },
     },
     "dracula": {
@@ -206,6 +223,11 @@ THEMES: dict[str, dict] = {
             "hunk": (117, -1),
             "header": (221, -1),
         },
+        "gutter": {
+            "added": (150, -1),
+            "modified": (221, -1),
+            "deleted": (203, -1),
+        },
     },
     "solarized_dark": {
         "name": "Solarized Dark",
@@ -238,6 +260,11 @@ THEMES: dict[str, dict] = {
             "del": (161, -1),
             "hunk": (116, -1),
             "header": (215, -1),
+        },
+        "gutter": {
+            "added": (108, -1),
+            "modified": (215, -1),
+            "deleted": (161, -1),
         },
     },
     "solarized_light": {
@@ -272,6 +299,11 @@ THEMES: dict[str, dict] = {
             "hunk": (31, -1),
             "header": (130, -1),
         },
+        "gutter": {
+            "added": (64, -1),
+            "modified": (130, -1),
+            "deleted": (160, -1),
+        },
     },
     "nord": {
         "name": "Nord",
@@ -304,6 +336,11 @@ THEMES: dict[str, dict] = {
             "del": (167, -1),
             "hunk": (110, -1),
             "header": (180, -1),
+        },
+        "gutter": {
+            "added": (108, -1),
+            "modified": (180, -1),
+            "deleted": (167, -1),
         },
     },
     "one_dark": {
@@ -338,6 +375,11 @@ THEMES: dict[str, dict] = {
             "hunk": (110, -1),
             "header": (215, -1),
         },
+        "gutter": {
+            "added": (149, -1),
+            "modified": (215, -1),
+            "deleted": (203, -1),
+        },
     },
     "tokyo_night": {
         "name": "Tokyo Night",
@@ -370,6 +412,11 @@ THEMES: dict[str, dict] = {
             "del": (210, -1),
             "hunk": (111, -1),
             "header": (215, -1),
+        },
+        "gutter": {
+            "added": (149, -1),
+            "modified": (215, -1),
+            "deleted": (210, -1),
         },
     },
     "gruvbox_dark": {
@@ -404,6 +451,11 @@ THEMES: dict[str, dict] = {
             "hunk": (108, -1),
             "header": (214, -1),
         },
+        "gutter": {
+            "added": (142, -1),
+            "modified": (214, -1),
+            "deleted": (203, -1),
+        },
     },
     "catppuccin_mocha": {
         "name": "Catppuccin Mocha",
@@ -436,6 +488,11 @@ THEMES: dict[str, dict] = {
             "del": (211, -1),
             "hunk": (111, -1),
             "header": (216, -1),
+        },
+        "gutter": {
+            "added": (151, -1),
+            "modified": (223, -1),
+            "deleted": (211, -1),
         },
     },
     "rose_pine": {
@@ -470,6 +527,11 @@ THEMES: dict[str, dict] = {
             "hunk": (182, -1),
             "header": (216, -1),
         },
+        "gutter": {
+            "added": (152, -1),
+            "modified": (216, -1),
+            "deleted": (168, -1),
+        },
     },
     "github_light": {
         "name": "GitHub Light",
@@ -502,6 +564,11 @@ THEMES: dict[str, dict] = {
             "del": (160, -1),
             "hunk": (26, -1),
             "header": (94, -1),
+        },
+        "gutter": {
+            "added": (29, -1),
+            "modified": (94, -1),
+            "deleted": (160, -1),
         },
     },
     "zenburn": {
@@ -536,6 +603,11 @@ THEMES: dict[str, dict] = {
             "hunk": (116, -1),
             "header": (180, -1),
         },
+        "gutter": {
+            "added": (108, -1),
+            "modified": (180, -1),
+            "deleted": (174, -1),
+        },
     },
     "everforest": {
         "name": "Everforest",
@@ -569,6 +641,11 @@ THEMES: dict[str, dict] = {
             "hunk": (108, -1),
             "header": (180, -1),
         },
+        "gutter": {
+            "added": (144, -1),
+            "modified": (180, -1),
+            "deleted": (174, -1),
+        },
     },
     "ayu": {
         "name": "Ayu",
@@ -601,6 +678,11 @@ THEMES: dict[str, dict] = {
             "del": (204, -1),
             "hunk": (74, -1),
             "header": (215, -1),
+        },
+        "gutter": {
+            "added": (149, -1),
+            "modified": (215, -1),
+            "deleted": (204, -1),
         },
     },
 }
@@ -672,6 +754,7 @@ def apply_theme(name: str = "default") -> None:
     syntax = theme.get("syntax", {})
     git = theme.get("git", {})
     diff = theme.get("diff", {})
+    gutter = theme.get("gutter", {})
 
     for role, pair in _PAIR_SYNTAX.items():
         fg, bg = _resolve(*syntax.get(role, (curses.COLOR_WHITE, -1)))
@@ -681,6 +764,9 @@ def apply_theme(name: str = "default") -> None:
         curses.init_pair(pair, fg, bg)
     for role, pair in _PAIR_DIFF.items():
         fg, bg = _resolve(*diff.get(role, (curses.COLOR_WHITE, -1)))
+        curses.init_pair(pair, fg, bg)
+    for role, pair in _PAIR_GUTTER.items():
+        fg, bg = _resolve(*gutter.get(role, (curses.COLOR_WHITE, -1)))
         curses.init_pair(pair, fg, bg)
 
 
@@ -702,10 +788,10 @@ def git_color(theme_name: str, role: str) -> int:
 def validate_themes() -> list[str]:
     """Return a list of missing role names across all themes (empty = OK)."""
     missing = []
-    required = set(_PAIR_SYNTAX) | set(_PAIR_GIT) | set(_PAIR_DIFF)
+    required = set(_PAIR_SYNTAX) | set(_PAIR_GIT) | set(_PAIR_DIFF) | set(_PAIR_GUTTER)
     for name in THEME_ORDER:
         theme = THEMES[name]
-        roles = set(theme.get("syntax", {})) | set(theme.get("git", {})) | set(theme.get("diff", {}))
+        roles = set(theme.get("syntax", {})) | set(theme.get("git", {})) | set(theme.get("diff", {})) | set(theme.get("gutter", {}))
         for role in required - roles:
             missing.append(f"{name}:{role}")
     return missing
