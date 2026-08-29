@@ -96,8 +96,8 @@ def _load() -> None:
         data = json.loads(raw)
         if isinstance(data, dict):
             for key in _DEFAULTS:
-                if key in data:
-                    _settings[key] = bool(data[key])
+                if key in data and isinstance(data[key], bool):
+                    _settings[key] = data[key]
     except (OSError, json.JSONDecodeError, ValueError):
         pass
     _enforce_radio_groups()

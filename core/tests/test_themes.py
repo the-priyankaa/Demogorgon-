@@ -1,6 +1,8 @@
 """Tests for the built-in theme system."""
 
 import unittest
+from unittest import mock
+
 from stdedit import themes
 
 
@@ -100,6 +102,21 @@ class TestResolveId(unittest.TestCase):
         self.assertEqual(themes.resolve_theme_id("nope"), "default")
         self.assertEqual(themes.resolve_theme_id(None), "default")
         self.assertEqual(themes.resolve_theme_id(""), "default")
+
+
+class TestApplyTheme(unittest.TestCase):
+    def test_apply_theme_noop_without_colors(self):
+        """apply_theme must not touch curses when color is unavailable."""
+        with mock.patch("stdedit.themes.curses.has_colors", return_value=False), \
+             mock.patch("stdedit.themes.curses.init_pair",
+                        side_effect=AssertionError("init_pair called")):
+            themes.apply_theme("monokai")
+
+    def test_apply_theme_unknown_name_falls_back_to_default(self):
+        with mock.patch("stdedit.themes.curses.has_colors", return_value=True), \
+             mock.patch("stdedit.themes.curses.init_pair") as init_pair:
+            themes.apply_theme("no_such_theme")
+            self.assertGreater(init_pair.call_count, 0)
 
 
 if __name__ == "__main__":

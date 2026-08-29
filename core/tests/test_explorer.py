@@ -376,5 +376,128 @@ class TestSearch(ExplorerTestBase):
         self.assertEqual(e.items, before)
 
 
+class TestFileOperations(ExplorerTestBase):
+    def select(self, explorer, path):
+        explorer.selected_idx = next(
+            i for i, item in enumerate(explorer.items)
+            if os.path.abspath(item[2]) == os.path.abspath(path))
+
+    def select_parent(self, explorer):
+        explorer.selected_idx = next(
+            i for i, item in enumerate(explorer.items) if item[2] == PARENT)
+
+    def test_delete_file(self):
+        e = FileExplorer(self.root)
+        target = os.path.join(self.root, "alpha.txt")
+        self.select(e, target)
+        ok, msg = e.delete_selected()
+        self.assertTrue(ok)
+        self.assertEqual(msg, "Deleted alpha.txt")
+        self.assertFalse(os.path.exists(target))
+
+    def test_delete_directory_recursively(self):
+        e = FileExplorer(self.root)
+        target = os.path.join(self.root, "sub_one")
+        self.select(e, target)
+        ok, _ = e.delete_selected()
+        self.assertTrue(ok)
+        self.assertFalse(os.path.exists(target))
+
+    def test_delete_refuses_parent_entry(self):
+        e = FileExplorer(self.root)
+        self.select_parent(e)
+        ok, msg = e.delete_selected()
+        self.assertFalse(ok)
+        self.assertEqual(msg, "Cannot delete parent entry")
+        self.assertTrue(os.path.isdir(self.root))
+
+    def test_delete_without_selection(self):
+        e = FileExplorer(self.root)
+        e.selected_idx = len(e.items) + 5   # out of range → no item
+        ok, msg = e.delete_selected()
+        self.assertFalse(ok)
+        self.assertEqual(msg, "No item selected")
+
+    def test_delete_missing_file_reports_failure(self):
+        e = FileExplorer(self.root)
+        target = os.path.join(self.root, "alpha.txt")
+        self.select(e, target)
+        os.remove(target)  # vanishes between listing and the delete action
+        ok, msg = e.delete_selected()
+        self.assertFalse(ok)
+        self.assertIn("Delete failed", msg)
+
+    def test_rename_file(self):
+        e = FileExplorer(self.root)
+        old = os.path.join(self.root, "beta.py")
+        new = os.path.join(self.root, "gamma.py")
+        self.select(e, old)
+        ok, msg = e.rename_selected("gamma.py")
+        self.assertTrue(ok)
+        self.assertEqual(msg, "Renamed to gamma.py")
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(os.path.exists(new))
+        self.assertEqual(e.get_selected()[2], new)
+
+    def test_rename_rejects_existing_target(self):
+        e = FileExplorer(self.root)
+        self.select(e, os.path.join(self.root, "alpha.txt"))
+        ok, msg = e.rename_selected("beta.py")
+        self.assertFalse(ok)
+        self.assertIn("already exists", msg)
+
+    def test_rename_rejects_invalid_name(self):
+        e = FileExplorer(self.root)
+        self.select(e, os.path.join(self.root, "alpha.txt"))
+        ok, msg = e.rename_selected("bad/name")
+        self.assertFalse(ok)
+        self.assertIn("single path component", msg)
+        self.assertTrue(os.path.exists(os.path.join(self.root, "alpha.txt")))
+
+    def test_rename_refuses_parent_entry(self):
+        e = FileExplorer(self.root)
+        self.select_parent(e)
+        ok, msg = e.rename_selected("newname")
+        self.assertFalse(ok)
+        self.assertEqual(msg, "Cannot rename parent entry")
+
+    def test_rename_directory(self):
+        e = FileExplorer(self.root)
+        old = os.path.join(self.root, "sub_two")
+        new = os.path.join(self.root, "renamed_dir")
+        self.select(e, old)
+        ok, _ = e.rename_selected("renamed_dir")
+        self.assertTrue(ok)
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(os.path.isdir(new))
+
+    def test_copy_path_absolute(self):
+        e = FileExplorer(self.root)
+        self.select(e, os.path.join(self.root, "beta.py"))
+        self.assertEqual(e.copy_path(), os.path.join(self.root, "beta.py"))
+
+    def test_copy_path_empty_without_selection(self):
+        e = FileExplorer(self.root)
+        e.selected_idx = len(e.items) + 5
+        self.assertEqual(e.copy_path(), "")
+
+    def test_copy_path_empty_for_parent(self):
+        e = FileExplorer(self.root)
+        self.select_parent(e)
+        self.assertEqual(e.copy_path(), "")
+
+    def test_copy_relative_path(self):
+        e = FileExplorer(self.root)
+        self.select(e, os.path.join(self.root, "beta.py"))
+        self.assertEqual(e.copy_relative_path(), "beta.py")
+        self.select(e, os.path.join(self.root, "sub_one"))
+        self.assertEqual(e.copy_relative_path(), "sub_one")
+
+    def test_copy_relative_path_empty_for_parent(self):
+        e = FileExplorer(self.root)
+        self.select_parent(e)
+        self.assertEqual(e.copy_relative_path(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -56,6 +56,27 @@ class TestRecentFiles(unittest.TestCase):
         recent.add_recent("foo.py")
         self.assertTrue(os.path.isabs(recent.get_recent()[0]))
 
+    def test_corrupt_json_returns_empty(self):
+        recent.RECENT_FILE.write_text("{not valid json!!!")
+        recent._recent = []
+        self.assertEqual(recent.get_recent(), [])
+
+    def test_non_list_json_returns_empty(self):
+        recent.RECENT_FILE.write_text('{"a": 1}')
+        recent._recent = []
+        self.assertEqual(recent.get_recent(), [])
+
+    def test_save_failure_is_silently_ignored(self):
+        # RECENT_FILE's parent is a regular file, so mkdir/write must fail.
+        blocker = os.path.join(self._tmpdir, "blocker")
+        with open(blocker, "w") as f:
+            f.write("not a dir")
+        recent.RECENT_FILE = Path(blocker) / "recent.json"
+        recent.add_recent("/tmp/survives.py")
+        # The in-memory list still carries the entry even though the disk
+        # write failed, and nothing raised.
+        self.assertEqual(recent.get_recent(), ["/tmp/survives.py"])
+
 
 if __name__ == "__main__":
     unittest.main()

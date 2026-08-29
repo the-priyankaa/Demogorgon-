@@ -250,5 +250,50 @@ class TestBufferImageMode(unittest.TestCase):
             os.unlink(path)
 
 
+class TestStatusAndHints(unittest.TestCase):
+    def test_image_status_text_contains_all_fields(self):
+        text = imageviewer.image_status_text(
+            "/tmp/photos/sunset.png", 800, 600, "png", 100, "fit")
+        self.assertIn("sunset.png", text)
+        self.assertIn("800x600", text)
+        self.assertIn("png", text)
+        self.assertIn("100%", text)
+        self.assertIn("fit", text)
+
+    def test_status_text_escapes_unknown_filename(self):
+        text = imageviewer.image_status_text("", 1, 1, "ppm", 50, "zoom")
+        self.assertIn("unknown", text)
+
+    def test_viewer_hints_decodable_format(self):
+        hints = imageviewer.viewer_hints("png")
+        self.assertIn("Home: fit", hints)
+        self.assertIn("+/- zoom", hints)
+        self.assertIn("Ctrl-Q: quit", hints)
+
+    def test_viewer_hints_passthrough_format(self):
+        for fmt in ("jpeg", "gif", "webp", "heic", "avif", "svg"):
+            hints = imageviewer.viewer_hints(fmt)
+            self.assertIn("fullscreen passthrough", hints, fmt)
+            self.assertNotIn("Home: fit", hints)
+
+
+class TestMalformedImages(unittest.TestCase):
+    def test_ppm_malformed_headers_raise_valueerror(self):
+        for blob in (b"", b"P6\n", b"P6\n0 0\n", b"P7 1 1", b"P2"):
+            with self.assertRaises(ValueError, msg=repr(blob)):
+                imageviewer.decode_ppm(blob)
+
+    def test_ppm_truncated_raster_is_graceful(self):
+        # Header is valid, raster is short — must not raise or hang.
+        width, height, pixels = imageviewer.decode_ppm(b"P6\n2 2\n255\n")
+        self.assertEqual((width, height), (2, 2))
+        self.assertIsInstance(pixels, list)
+        self.assertLessEqual(len(pixels), 4)
+
+    def test_ppm_ascii_garbage_dimensions(self):
+        with self.assertRaises(ValueError):
+            imageviewer.decode_ppm(b"P3\nabc def\n")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -123,6 +123,21 @@ def main(argv=None) -> int:
             print(f"  {path}")
         return 0
 
+    if not sys.stdin.isatty():
+        print(
+            "stdedit: an interactive terminal is required "
+            "(stdin is not a TTY; run inside a terminal)",
+            file=sys.stderr,
+        )
+        return 1
+    if not os.environ.get("TERM"):
+        print(
+            "stdedit: TERM is unset; set TERM (e.g. xterm-256color) "
+            "to use the editor",
+            file=sys.stderr,
+        )
+        return 1
+
     buf = Buffer(
         tab_size=args.tab_size,
         use_spaces=not args.tabs,
@@ -134,6 +149,9 @@ def main(argv=None) -> int:
         except FileNotFoundError:
             # New file — that's fine, just remember the intended name.
             buf.filename = buffer_file
+        except OSError as exc:
+            print(f"stdedit: cannot open {buffer_file}: {exc}", file=sys.stderr)
+            return 1
 
     # Extensions are opt-in so the bare editor stays lean.
     # --all-extensions keeps the old eager behavior for power users.

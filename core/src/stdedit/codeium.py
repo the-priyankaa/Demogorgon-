@@ -33,11 +33,15 @@ def get_api_key() -> str:
 
 
 def set_api_key(key: str) -> None:
-    """Persist the Codeium API key."""
+    """Persist the Codeium API key (owner-only file: 0600)."""
     path = _key_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write(key.strip())
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def _extract_prefix(buffer_lines: list[str], cursor_y: int, cursor_x: int,

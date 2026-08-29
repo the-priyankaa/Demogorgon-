@@ -19,7 +19,8 @@ Everything below is stdlib-only. This log exists so judges can verify the
 | —                    | `json`                   | Config + token-rule schema serialization. |
 
 **Count: 11 substitutions documented** (qualifies for the +3 STDLIB Log bonus
-at 10+).
+at 10+). Rows marked *planned* are remaining roadmap items; the 7 shipped
+substitutions above are already in use in `core/`.
 
 ## Verifying it yourself
 
@@ -28,8 +29,9 @@ bash scripts/deps-proof.sh
 cat deps-proof.txt
 ```
 
-This imports every `stdedit` submodule and confirms nothing resolves to
-`site-packages`. See `.zero-dep.toml` for the machine-readable pledge.
+`scripts/deps-proof.sh` imports all 33 `stdedit` submodules (via
+`pkgutil.walk_packages`) and confirms nothing resolves to `site-packages`.
+See `.zero-dep.toml` for the machine-readable pledge.
 
 ## Extension mechanism
 

@@ -40,6 +40,62 @@ class TestExtensionAPI(unittest.TestCase):
             self.assertEqual(len(errors), 1)
             self.assertEqual(api.loaded[0].name, "good")
 
+class TestCallbackIsolation(unittest.TestCase):
+    """A raising callback must never kill the editor (Bug #2 regression)."""
+
+    def setUp(self):
+        self._editor = _Editor()
+        self.api = ExtensionAPI(self._editor)
+
+    def test_raising_status_provider_is_skipped(self):
+        self.api.add_status(lambda e: "ok")
+        self.api.add_status(lambda e: (_ for _ in ()).throw(RuntimeError("boom")))
+        # No exception escapes; bad provider is skipped, good one still shows.
+        self.assertEqual(self.api.status(), "ok")
+        self.assertEqual(len(self.api.runtime_errors()), 1)
+        self.assertIn("status", self.api.runtime_errors()[0])
+
+    def test_raising_startup_callback_is_isolated(self):
+        seen = []
+        self.api.on_startup.append(lambda e: seen.append("a"))
+        self.api.on_startup.append(lambda e: (_ for _ in ()).throw(RuntimeError("x")))
+        self.api.on_startup.append(lambda e: seen.append("c"))
+        self.api.startup()
+        self.assertEqual(seen, ["a", "c"])
+        self.assertEqual(len(self.api.runtime_errors()), 1)
+
+    def test_raising_shutdown_callback_is_isolated(self):
+        self.api.on_shutdown.append(lambda e: (_ for _ in ()).throw(RuntimeError("x")))
+        self.api.shutdown()  # must not raise
+        self.assertEqual(len(self.api.runtime_errors()), 1)
+
+    def test_raising_key_handler_falls_through_to_next(self):
+        raised = lambda e, k: (_ for _ in ()).throw(RuntimeError("k"))
+        good = lambda e, k: setattr(e, "value", e.value + 1) or True
+        self.api.bind_key("x", raised)
+        self.api.bind_key("x", good)
+        # First raises (isolated), second runs and reports handled.
+        self.assertTrue(self.api.dispatch_key("x"))
+        self.assertEqual(self._editor.value, 1)
+        self.assertEqual(len(self.api.runtime_errors()), 1)
+
+    def test_only_raising_handler_returns_not_handled(self):
+        self.api.bind_key("x", lambda e, k: (_ for _ in ()).throw(ValueError("bad")))
+        self.assertFalse(self.api.dispatch_key("x"))
+
+    def test_raise_is_not_rethrown_to_caller(self):
+        seen = []
+        self.api.add_command("cmd", lambda e: seen.append("ran"))
+        for name, invoke in (
+            ("startup", self.api.startup),
+            ("shutdown", self.api.shutdown),
+            ("status", self.api.status),
+            ("key", lambda: self.api.dispatch_key("z")),
+        ):
+            self.api._safe_call(name, lambda e: (_ for _ in ()).throw(RuntimeError(name)))
+        self.assertEqual(len(self.api.runtime_errors()), 4)
+
+
 class TestExternalExtensionDiscovery(unittest.TestCase):
     def test_requested_extension_loads_only_selected_file(self):
         with tempfile.TemporaryDirectory() as d:

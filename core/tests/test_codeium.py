@@ -32,6 +32,15 @@ class TestKeyStorage(unittest.TestCase):
                    return_value="/nonexistent/path/key"):
             self.assertEqual(get_api_key(), "")
 
+    @patch("os.path.expanduser")
+    def test_key_file_is_owner_only(self, mock_expand):
+        mock_expand.return_value = self._tmpdir
+        keyfile = os.path.join(self._tmpdir, "codeium_key")
+        with patch("stdedit.codeium._key_path", return_value=keyfile):
+            set_api_key("secret-key-xyz")
+        mode = os.stat(keyfile).st_mode & 0o777
+        self.assertEqual(mode, 0o600, "key file must be owner-readable only")
+
     def test_language_id_python(self):
         self.assertEqual(_language_id("foo.py"), "python")
 

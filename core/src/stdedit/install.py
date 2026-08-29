@@ -186,7 +186,11 @@ def cmd_deps(args, root, bin_dir, _which=shutil.which,
             continue
         command = [*prefix, package]
         print(f"$ {' '.join(command)}")
-        result = _run(command)
+        try:
+            result = _run(command, timeout=120)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"       failed: {exc}")
+            continue
         rc = getattr(result, "returncode", 0)
         print(f"       {'ok' if rc == 0 else f'failed (exit {rc})'}")
 
@@ -243,7 +247,11 @@ def cmd_install(args, root, bin_dir, runner=subprocess.run):
         print(f"[1/5] venv already present: {venv}")
     else:
         print(f"[1/5] creating venv: {venv}")
-        result = runner([sys.executable, "-m", "venv", venv])
+        try:
+            result = runner([sys.executable, "-m", "venv", venv], timeout=300)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"carl: venv creation failed: {exc}")
+            return 1
         if getattr(result, "returncode", 0) != 0:
             print(f"carl: venv creation failed "
                   f"(exit {getattr(result, 'returncode', '?')})")
@@ -251,8 +259,12 @@ def cmd_install(args, root, bin_dir, runner=subprocess.run):
 
     venv_python = os.path.join(get_venv_bin(root), "python")
     print("[2/5] installing editor into venv (editable)")
-    result = runner([venv_python, "-m", "pip", "install", "-e", root,
-                     "--quiet"])
+    try:
+        result = runner([venv_python, "-m", "pip", "install", "-e", root,
+                         "--quiet"], timeout=600)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"carl: pip install failed: {exc}")
+        return 1
     if getattr(result, "returncode", 0) != 0:
         print(f"carl: pip install failed "
               f"(exit {getattr(result, 'returncode', '?')})")

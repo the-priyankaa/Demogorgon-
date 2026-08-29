@@ -220,6 +220,50 @@ class TestRadioGroup(unittest.TestCase):
         self.assertFalse(settings.is_radio_key("no_such_key"))
 
 
+class TestStrictBooleans(unittest.TestCase):
+    """Only literal JSON booleans may set a bool setting."""
+
+    def setUp(self):
+        settings._settings = dict(settings._DEFAULTS)
+        self._tmp = tempfile.TemporaryDirectory()
+        self._dir = Path(self._tmp.name)
+        self._file = self._dir / "settings.json"
+        self._patch_config = mock.patch.object(settings, "CONFIG_DIR", self._dir)
+        self._patch_file = mock.patch.object(settings, "CONFIG_FILE", self._file)
+        self._patch_config.start()
+        self._patch_file.start()
+
+    def tearDown(self):
+        self._patch_file.stop()
+        self._patch_config.stop()
+        self._tmp.cleanup()
+
+    def test_non_bool_values_ignored(self):
+        self._file.write_text(json.dumps({
+            "auto_save_idle": 1,
+            "suggestions_off": "yes",
+            "codeium_on": "false",
+            "auto_save_on_edit": None,
+        }))
+        settings._load()
+        # All stay at their defaults; nothing became truthy.
+        self.assertFalse(settings.get("auto_save_idle"))
+        self.assertTrue(settings.get("suggestions_off"))   # default is on
+        self.assertFalse(settings.get("codeium_on"))
+        self.assertFalse(settings.get("auto_save_on_edit"))
+
+    def test_real_bool_is_respected(self):
+        self._file.write_text(json.dumps({
+            "suggestions_off": False,
+            "codeium_on": True,
+            "auto_save_idle": False,
+        }))
+        settings._load()
+        self.assertTrue(settings.get("codeium_on"))
+        self.assertFalse(settings.get("suggestions_off"))
+        self.assertFalse(settings.get("auto_save_idle"))
+
+
 class TestSuggestionsRadioGroup(unittest.TestCase):
     """SUGGESTIONS options are mutually exclusive and default to Off."""
 

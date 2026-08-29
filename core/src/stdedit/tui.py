@@ -788,15 +788,24 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         now = time.time()
         if buf.modified and buf.filename:
             saved = False
+            save_error = None
             if settings.get("auto_save_idle") and now - _last_edit_time >= 5:
-                buf.save()
-                saved = True
+                try:
+                    buf.save()
+                    saved = True
+                except (ValueError, OSError) as exc:
+                    save_error = exc
             elif settings.get("auto_save_periodic") and now - _last_save_time >= 30:
-                buf.save()
-                saved = True
+                try:
+                    buf.save()
+                    saved = True
+                except (ValueError, OSError) as exc:
+                    save_error = exc
             if saved:
                 _last_save_time = now
                 status = "Auto-saved"
+            elif save_error is not None:
+                status = f"Auto-save failed: {save_error}"
 
         # --- Mouse events (before all other key handling) ---
         if isinstance(key, tuple) and key[0] == "__mouse__":
@@ -1409,6 +1418,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                     break
                 except ValueError:
                     status = "No filename — cannot save"
+                except OSError as exc:
+                    status = f"Could not save: {exc}"
             else:
                 status = ""
         elif key == "\x13":  # Ctrl-S
@@ -1417,6 +1428,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 status = f"Saved {buf.filename}"
             except ValueError:
                 status = "No filename — run with a file argument to enable saving"
+            except OSError as exc:
+                status = f"Could not save: {exc}"
         elif key == "\x1a":  # Ctrl-Z undo
             status = "Undo" if buf.undo() else "Nothing to undo"
         elif key == "\x19":  # Ctrl-Y redo
@@ -2492,6 +2505,8 @@ def open_file_path(stdscr, buf: Buffer, explorer: Optional[FileExplorer], path: 
                 buf.save()
             except ValueError:
                 return current_language, "No filename — cannot save; open cancelled"
+            except OSError as exc:
+                return current_language, f"Could not save; open cancelled: {exc}"
         elif choice != "discard":
             return current_language, "Open cancelled"
     try:

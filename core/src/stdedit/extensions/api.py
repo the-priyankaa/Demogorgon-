@@ -31,6 +31,16 @@ class ExtensionAPI:
         self.on_shutdown: List[Callback] = []
         self.status_providers: List[StatusProvider] = []
         self.loaded: List[Extension] = []
+        self._errors: List[str] = []
+
+    def _safe_call(self, what: str, fn: Callable, *args: Any) -> Any:
+        """Run `fn`, swallowing exceptions so extension bugs never kill
+        the editor.  Failures are recorded so tests/UI can inspect them."""
+        try:
+            return fn(*args)
+        except Exception as exc:  # noqa: BLE001 - extension boundary
+            self._errors.append(f"{what}: {type(exc).__name__}: {exc}")
+            return None
 
     def add_command(self, name: str, callback: Command) -> None:
         if not name or not callable(callback):
@@ -53,21 +63,26 @@ class ExtensionAPI:
     def dispatch_key(self, key: Any) -> bool:
         handled = False
         for callback in self.key_handlers.get(key, ()):
-            handled = bool(callback(self.editor, key)) or handled
+            result = self._safe_call("key", callback, self.editor, key)
+            handled = bool(result) or handled
         return handled
 
     def startup(self) -> None:
         for callback in self.on_startup:
-            callback(self.editor)
+            self._safe_call("startup", callback, self.editor)
 
     def shutdown(self) -> None:
         for callback in reversed(self.on_shutdown):
-            callback(self.editor)
+            self._safe_call("shutdown", callback, self.editor)
 
     def status(self) -> str:
         parts = []
         for callback in self.status_providers:
-            value = callback(self.editor)
+            value = self._safe_call("status", callback, self.editor)
             if value:
                 parts.append(value)
         return "  ".join(parts)
+
+    def runtime_errors(self) -> List[str]:
+        """Callback failures since the last look, for tests and UI hints."""
+        return list(self._errors)

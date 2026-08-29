@@ -233,6 +233,56 @@ class TestInstallFlow(InstallTestBase):
         self.assertTrue(os.path.islink(os.path.join(self.bin_dir, "stdedit")))
 
 
+class TestRunFaults(InstallTestBase):
+    """Missing python/pip binaries must be reported, not traced back."""
+
+    def raise_on_step(self, fragment):
+        def runner(cmd, **kwargs):
+            cmd = list(cmd)
+            if any(fragment in str(c) for c in cmd):
+                raise FileNotFoundError(fragment)
+            if "venv" in cmd:
+                self.fabricate_venv_step(cmd)
+            return SimpleNamespace(returncode=0)
+        return runner
+
+    def test_missing_python_aborts_venv_creation_cleanly(self):
+        run = self.raise_on_step(sys.executable)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = install.cmd_install(SimpleNamespace(command="install"),
+                                     self.root, self.bin_dir, runner=run)
+        self.assertEqual(rc, 1)
+        self.assertIn("venv creation failed", out.getvalue())
+
+    def test_broken_venv_python_aborts_pip_install_cleanly(self):
+        # A venv dir exists, so step 1 is skipped; the side effect fabricates
+        # launcher scripts only if a real venv step ran (it won't).
+        os.makedirs(self.venv_bin(), exist_ok=True)
+        run = self.raise_on_step("pip")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = install.cmd_install(SimpleNamespace(command="install"),
+                                     self.root, self.bin_dir, runner=run)
+        self.assertEqual(rc, 1)
+        self.assertIn("pip install failed", out.getvalue())
+        self.assertNotIn("Traceback", out.getvalue())
+
+    def test_deps_fix_unrunnable_manager_reports_failure(self):
+        which, _ = fake_which_state(("apt-get",))
+
+        def run(cmd, **kwargs):
+            raise OSError("sudo not available")
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = install.main(["deps", "--fix"], _root="/unused",
+                              _bin_dir="/unused", _run=run, _which=which)
+        self.assertEqual(rc, 1)
+        self.assertIn("failed", out.getvalue())
+        self.assertIn("still missing", out.getvalue())
+
+
 class TestStatus(InstallTestBase):
     def test_status_reports_mixed_state_without_crashing(self):
         self.make_launcher("stdedit")

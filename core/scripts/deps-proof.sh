@@ -13,20 +13,20 @@ echo "-- sys.path (no site-packages should be required) --" >> "$OUT"
 python3 -c "import sys; [print(p) for p in sys.path]" >> "$OUT"
 echo "" >> "$OUT"
 
-echo "-- import trace for stdedit --" >> "$OUT"
+echo "-- import trace for stdedit (every module) --" >> "$OUT"
 PYTHONPATH=src python3 -c "
-import sys, importlib
+import sys, importlib, pkgutil
 
 before = set(sys.modules)
 import stdedit
-importlib.import_module('stdedit.buffer')
-importlib.import_module('stdedit.undo')
-importlib.import_module('stdedit.tui')
-importlib.import_module('stdedit.languages.schema')
+mods = sorted(m.name for m in pkgutil.walk_packages(
+    stdedit.__path__, 'stdedit.'))
+assert len(mods) >= 30, mods
+for m in mods:
+    importlib.import_module(m)
 after = set(sys.modules)
 
 new_mods = sorted(after - before)
-stdlib_paths = (sys.prefix, sys.base_prefix)
 
 third_party = []
 for name in new_mods:
@@ -35,6 +35,7 @@ for name in new_mods:
     if f and 'site-packages' in f:
         third_party.append((name, f))
 
+print(f'stdedit modules imported: {len(mods)}')
 print('Newly imported modules:')
 for n in new_mods:
     print(' -', n)

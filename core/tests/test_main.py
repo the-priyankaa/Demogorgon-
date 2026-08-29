@@ -1,7 +1,13 @@
+import io
 import os
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from types import SimpleNamespace
+from unittest import mock
 
+import stdedit.main as app
 from stdedit.main import build_parser, resolve_open_targets
 
 
@@ -74,6 +80,92 @@ class TestResolveOpenTargets(unittest.TestCase):
         buf_file, project_dir, error = resolve_open_targets(missing, None)
         self.assertIsNone(error)
         self.assertEqual(buf_file, missing)
+
+
+def _fake_tty():
+    """Replace sys.stdin with an object that reports being a terminal."""
+    return mock.patch.object(
+        sys, "stdin", SimpleNamespace(isatty=lambda: True))
+
+
+def _fake_pipe():
+    """Replace sys.stdin with an object that is explicitly not a terminal."""
+    return mock.patch.object(
+        sys, "stdin", SimpleNamespace(isatty=lambda: False))
+
+
+class TestMainExitCodes(unittest.TestCase):
+    """main() must give friendly exits instead of raw curses tracebacks."""
+
+    def _env(self, term):
+        return mock.patch.dict(os.environ, {"TERM": term})
+
+    def test_piped_stdin_exits_1_without_launching_tui(self):
+        with _fake_pipe(), \
+             self._env("xterm-256color"), \
+             mock.patch.object(app.tui, "run") as run, \
+             redirect_stderr(io.StringIO()) as err:
+            rc = app.main(["a.py"])
+        self.assertEqual(rc, 1)
+        self.assertIn("interactive terminal", err.getvalue())
+        run.assert_not_called()
+
+    def test_missing_term_exits_1_without_launching_tui(self):
+        with _fake_tty(), \
+             mock.patch.dict(os.environ, {}), \
+             mock.patch.object(app.tui, "run") as run, \
+             redirect_stderr(io.StringIO()) as err:
+            os.environ.pop("TERM", None)
+            rc = app.main(["a.py"])
+        self.assertEqual(rc, 1)
+        self.assertIn("TERM", err.getvalue())
+        run.assert_not_called()
+
+    def test_unreadable_file_exits_1_with_friendly_message(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "locked.txt")
+            with open(path, "w") as f:
+                f.write("data")
+            os.chmod(path, 0o000)
+            try:
+                with _fake_tty(), self._env("xterm-256color"), \
+                     mock.patch.object(app.tui, "run") as run, \
+                     redirect_stderr(io.StringIO()) as err:
+                    rc = app.main([path])
+                self.assertEqual(rc, 1)
+                self.assertIn("cannot open", err.getvalue())
+                run.assert_not_called()
+            finally:
+                os.chmod(path, 0o644)
+
+    def test_opens_file_and_launches_tui(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "doc.txt")
+            with open(path, "w") as f:
+                f.write("hello world\n")
+            with _fake_tty(), self._env("xterm-256color"), \
+                 mock.patch.object(app.tui, "run") as run:
+                rc = app.main([path])
+            self.assertEqual(rc, 0)
+            run.assert_called_once()
+            buf = run.call_args.args[0]
+            self.assertEqual(buf.filename, path)
+            self.assertEqual(buf.lines[0], "hello world")
+
+    def test_directory_positional_becomes_project(self):
+        with tempfile.TemporaryDirectory() as d:
+            with _fake_tty(), self._env("xterm-256color"), \
+                 mock.patch.object(app.tui, "run") as run:
+                rc = app.main([d])
+            self.assertEqual(rc, 0)
+            run.assert_called_once()
+            self.assertEqual(run.call_args.kwargs["project_dir"],
+                             os.path.abspath(d))
+
+    def test_list_extensions_needs_no_tty(self):
+        with _fake_pipe():
+            rc = app.main(["--list-extensions"])
+        self.assertEqual(rc, 0)
 
 
 if __name__ == "__main__":
