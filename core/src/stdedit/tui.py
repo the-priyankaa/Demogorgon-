@@ -56,6 +56,20 @@ from . import pickdir
 from . import suggest
 from .import codeium
 from . import runner
+from . import newfile
+from . import extview
+from .render import safe_render as _safe_render
+
+# Explicit dashboard-owned UI states (UI alignment spec §1).  Each overlay
+# lives in exactly one state; none of them instantiate a fake document.
+UI_DASHBOARD = "dashboard"
+UI_FIND_FILE = "find_file"
+UI_RECENT_FILES = "recent_files"
+UI_NEW_FILE = "new_file"
+UI_EXTENSIONS = "extensions"
+UI_RUN_OUTPUT = "run_output"
+UI_SETTINGS = "settings"
+UI_HELP = "help"
 
 _COLOR_PAIRS = {
     "keyword": 1,
@@ -235,8 +249,8 @@ def _draw_centered_message(stdscr, line: str, height: int, width: int,
         y = max(0, height // 2)
     x = max(0, (width - len(line)) // 2)
     try:
-        stdscr.addstr(y, x, line[: width - x])
-    except curses.error:
+        stdscr.addstr(y, x, _safe_render(line[: width - x]))
+    except (curses.error, ValueError, UnicodeEncodeError):
         pass
 
 
@@ -305,11 +319,11 @@ def _image_viewer_frame(stdscr, buf: Buffer, st: dict) -> Optional[str]:
     base = imageviewer.fit_scale(st.get("width", 0), st.get("height", 0),
                                  cell_w, cell_h)
     try:
-        stdscr.addstr(height - 1, 0, title[: width - 1].ljust(width - 1),
+        stdscr.addstr(height - 1, 0, _safe_render(title[: width - 1].ljust(width - 1)),
                       curses.A_REVERSE)
         if base <= 0:
-            stdscr.addstr(height - 2, 0, hint[: width - 1], curses.A_DIM)
-    except curses.error:
+            stdscr.addstr(height - 2, 0, _safe_render(hint[: width - 1]), curses.A_DIM)
+    except (curses.error, ValueError, UnicodeEncodeError):
         pass
     stdscr.refresh()
 
@@ -454,6 +468,40 @@ def _is_ctrl_enter_csi(stdscr) -> bool:
         return False
     finally:
         stdscr.nodelay(False)
+
+
+def _is_ctrl_1(stdscr) -> bool:
+    """Return True when the input stream is a CSI-u Ctrl+1 sequence.
+
+    Terminals that implement the CSI-u protocol encode Ctrl+1 distinctly
+    from ESC: ``ESC [ 4 9 ; 5 u`` (xterm style) or ``ESC [ 4 9 : 5 u``
+    (kitty).  The main loop has already consumed ``ESC``; a following ``[``
+    is expected.  Terminals without CSI-u cannot disambiguate Ctrl+1 from a
+    plain ``1`` and simply report ``1`` — that is beyond the app's control.
+
+    When the sequence does not match, every character read here is pushed
+    back so the caller still sees the untouched stream.
+    """
+    stdscr.nodelay(True)
+    try:
+        consumed = []
+        for _ in range(16):
+            ch = stdscr.getch()
+            if ch == -1:
+                break
+            consumed.append(chr(ch))
+            # End of a CSI code is a single byte in @-~; the leading '[' is
+            # part of the sequence, not its terminator.
+            if 0x40 <= ch <= 0x7E and ch != ord("["):
+                break
+        seq = "".join(consumed)
+        if seq in ("[49;5u", "[49:5u", "[1;5u"):
+            return True
+        for c in reversed(consumed):
+            curses.ungetch(ord(c))
+        return False
+    finally:
+        stdscr.nodelay(False)
 # ---------------------------------------------------------------------- #
 _search: dict = {
     "query": "",
@@ -469,6 +517,37 @@ _mouse_dragging: bool = False
 _last_click_time: float = 0.0
 _click_count: int = 0
 _CLICK_THRESHOLD: float = 0.4
+
+
+def _overlay_signature(qo, recent_picker, show_settings, settings_idx,
+                       expanded_sections, show_help, help_scroll,
+                       help_total, height, width) -> tuple:
+    """Fingerprint the visible state of every editor-path overlay.
+
+    The main loop repaints an overlay only when this signature changes
+    (dirty-frame skip): once the content settles — typing stopped, results
+    loaded, selection idle — the signature is stable and the TUI performs
+    zero draw calls per poll.  That is what removes the 50 ms full-screen
+    shutter while the user is typing and the per-keystroke repaint churn.
+    """
+    parts = [height, width]
+    parts.append(1 if qo.visible else 0)
+    if qo.visible:
+        parts += [qo.query, qo.selected_idx, len(qo.results),
+                  qo.loading, qo.scoring, qo.scan_error, qo.capped]
+    parts.append(1 if recent_picker.active else 0)
+    if recent_picker.active:
+        parts += [recent_picker.selected, tuple(recent_picker.entries)]
+    parts.append(1 if show_settings else 0)
+    if show_settings:
+        values = tuple(sorted(
+            (k, settings.get(k)) for k, _ in settings.LABELS if k))
+        parts += [settings_idx, tuple(sorted(expanded_sections.items())),
+                  values]
+    parts.append(1 if show_help else 0)
+    if show_help:
+        parts += [help_scroll, help_total, height]
+    return tuple(parts)
 
 
 def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None, tree_on_start: bool = False) -> None:
@@ -536,6 +615,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     show_help = False
     show_settings = False
     settings_idx = 0
+    help_scroll = 0
     expanded_sections: dict[str, bool] = {}
     _last_edit_time = time.time()
     _last_save_time = time.time()
@@ -563,6 +643,17 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     dashboard_selected = 0
     dashboard_started = time.perf_counter()
     dashboard_message = ""
+    # Explicit dashboard-overlay state: None means the base YUKI screen.
+    # Overlays are composed over the dashboard and never instantiate a
+    # fake/blank document buffer (UI alignment spec §1, §3).
+    dashboard_overlay: str | None = None
+    new_file_picker = newfile.NewFilePicker()
+    ext_view = extview.ExtensionsView()
+    # Dirty-frame skip: the last overlay signature that was actually painted.
+    # Equal signature on the next poll => skip erase/base/overlay/refresh.
+    overlay_last_sig: tuple | None = None
+    _help_sig_width = -1
+    _help_sig_total = 0
     sug = suggest.Suggestor()
     sug_words: "object" = {}
     sug_fp = None
@@ -595,104 +686,173 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     while True:
         frame_started = meter.frame_start()
         if dashboard_active:
-            meter.frame_end(frame_started)
-            dashboard.draw(
-                stdscr,
-                dashboard_selected,
-                time.perf_counter() - dashboard_started,
-                format_bytes(meter.rss),
-                message=dashboard_message,
-            )
-            key = _get_key(stdscr)
-            dashboard_message = ""
-            if key in ("q", "Q", "\x11"):
-                return
-            if key in (curses.KEY_UP,):
-                dashboard_selected = (dashboard_selected - 1) % dashboard.action_count()
-                continue
-            if key in (curses.KEY_DOWN, "\t"):
-                dashboard_selected = (dashboard_selected + 1) % dashboard.action_count()
-                continue
-            if key in ("\n", "\r", " "):
-                key = dashboard.action_key(dashboard_selected)
-            if key in ("f", "F"):
-                explorer.set_root(os.path.expanduser("~"))
-                explorer.active = False
-                explorer.visible = False
-                quick_open.mode = "files"
-                quick_open.open()
-                stdscr.timeout(50)
-                dashboard_active = False
-                continue
-            if key in ("d", "D"):
-                explorer.set_root(os.path.expanduser("~"))
-                explorer.active = False
-                explorer.visible = False
-                quick_open.mode = "folders"
-                quick_open.open()
-                stdscr.timeout(50)
-                dashboard_active = False
-                continue
-            if key in ("r", "R"):
-                recent_picker.open()
-                stdscr.timeout(50)
-                dashboard_active = False
-                continue
-            if key in ("o", "O"):
-                result = pickdir.choose_directory()
-                if result[0] == "ok":
-                    dashboard_active = False
-                    explorer.set_root(result[1])
-                    explorer.visible = True
-                    explorer.active = True
-                    root_dir = result[1]
-                    quick_open = QuickOpen(root_dir, show_recent_on_empty=False)
-                    status = f"Folder browser: {result[1]} — Enter opens files/folders, Esc to focus the editor"
-                elif result[0] == "cancelled":
-                    dashboard_message = "Folder dialog cancelled"
+            if dashboard_overlay in (UI_NEW_FILE, UI_EXTENSIONS):
+                # One composed frame, single refresh: the dashboard is drawn
+                # without refreshing, the overlay is painted on top, then the
+                # terminal is refreshed exactly once (no camera-shutter
+                # flicker).
+                meter.frame_end(frame_started)
+                dashboard.draw(
+                    stdscr,
+                    dashboard_selected,
+                    time.perf_counter() - dashboard_started,
+                    format_bytes(meter.rss),
+                    message=dashboard_message,
+                    refresh=False,
+                )
+                _ov_h, _ov_w = stdscr.getmaxyx()
+                if dashboard_overlay == UI_NEW_FILE:
+                    newfile.draw(stdscr, new_file_picker, _ov_h, _ov_w)
                 else:
-                    dashboard_active = False
-                    explorer.set_root(os.path.expanduser("~"))
-                    explorer.visible = True
-                    explorer.active = True
-                    root_dir = os.path.expanduser("~")
-                    quick_open = QuickOpen(root_dir, show_recent_on_empty=False)
-                    status = "System folder dialog unavailable — browsing home"
-                continue
-            if key in ("n", "N"):
-                dashboard_active = False
-                explorer.visible = False
-                explorer.active = False
-                buf.filename = None
-                language = schema.detect_language(buf.filename or "")
-                status = "New file — type to edit, Ctrl-S to save it"
-                continue
-            if key in ("c", "C"):
-                dashboard_active = False
-                show_settings = True
-                explorer.visible = False
-                continue
-            if key in ("s", "S"):
-                items = recent.get_recent()
-                path = next((p for p in items if os.path.isfile(p)), None)
-                if path:
-                    language, status = open_file_path(
-                        stdscr, buf, explorer, path,
-                        render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
-                    )
-                    if status.startswith("Opened"):
-                        buf.configure_for_language(language)
-                        explorer.active = False
+                    extview.draw(stdscr, ext_view, _ov_h, _ov_w)
+                stdscr.refresh()
+                key = _get_key(stdscr)
+                if key == "\x1b" and _is_ctrl_1(stdscr):
+                    key = newfile.CTRL_1
+                if dashboard_overlay == UI_NEW_FILE:
+                    action = new_file_picker.handle_key(key)
+                    if action == "created":
+                        path = os.path.join(new_file_picker.cwd,
+                                            new_file_picker.filename)
+                        dashboard_overlay = None
+                        dashboard_message = ""
+                        language, status = open_file_path(
+                            stdscr, buf, explorer, path,
+                            render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
+                        )
+                        if status.startswith("Opened"):
+                            buf.configure_for_language(language)
+                            explorer.active = False
+                        else:
+                            # Creation succeeded, opening failed: revert to
+                            # the base dashboard instead of dying.
+                            dashboard_active = True
+                            dashboard_message = status
+                            continue
                         dashboard_active = False
-                else:
-                    status = "No recent file to restore"
+                        continue
+                    if action == "dashboard":
+                        dashboard_overlay = None
+                        dashboard_message = ""
+                    continue
+                # Extensions overlay keys.
+                if key in (newfile.CTRL_1, "\x1b"):
+                    ext_view.close()
+                    dashboard_overlay = None
+                    dashboard_message = ""
+                    continue
+                if key == curses.KEY_UP:
+                    ext_view.move(-1)
+                    continue
+                if key == curses.KEY_DOWN:
+                    ext_view.move(1)
+                    continue
                 continue
-            if key in ("h", "H") or key == curses.KEY_F1:
-                dashboard_active = False
-                show_help = True
-                help_scroll = 0
+            overlay_open = (quick_open.visible or recent_picker.active
+                            or show_settings or show_help)
+            if not overlay_open:
+                meter.frame_end(frame_started)
+                dashboard.draw(
+                    stdscr,
+                    dashboard_selected,
+                    time.perf_counter() - dashboard_started,
+                    format_bytes(meter.rss),
+                    message=dashboard_message,
+                )
+                key = _get_key(stdscr)
+                dashboard_message = ""
+                if key in ("q", "Q", "\x11"):
+                    return
+                if key in (curses.KEY_UP,):
+                    dashboard_selected = (dashboard_selected - 1) % dashboard.action_count()
+                    continue
+                if key in (curses.KEY_DOWN, "\t"):
+                    dashboard_selected = (dashboard_selected + 1) % dashboard.action_count()
+                    continue
+                if key in ("\n", "\r", " "):
+                    key = dashboard.action_key(dashboard_selected)
+                if key in ("f", "F"):
+                    # Search overlay is composed over the live dashboard; the
+                    # dashboard remains the base frame (no blank editor behind
+                    # the box), so dashboard_active stays True.
+                    explorer.set_root(os.path.expanduser("~"))
+                    explorer.active = False
+                    explorer.visible = False
+                    quick_open.mode = "files"
+                    quick_open.open()
+                    stdscr.timeout(50)
+                    continue
+                if key in ("d", "D"):
+                    explorer.set_root(os.path.expanduser("~"))
+                    explorer.active = False
+                    explorer.visible = False
+                    quick_open.mode = "folders"
+                    quick_open.open()
+                    stdscr.timeout(50)
+                    continue
+                if key in ("r", "R"):
+                    recent_picker.open()
+                    stdscr.timeout(50)
+                    continue
+                if key in ("e", "E"):
+                    ext_view.open()
+                    dashboard_overlay = UI_EXTENSIONS
+                    continue
+                if key in ("o", "O"):
+                    result = pickdir.choose_directory()
+                    if result[0] == "ok":
+                        dashboard_active = False
+                        explorer.set_root(result[1])
+                        explorer.visible = True
+                        explorer.active = True
+                        root_dir = result[1]
+                        quick_open = QuickOpen(root_dir, show_recent_on_empty=False)
+                        status = f"Folder browser: {result[1]} — Enter opens files/folders, Esc to focus the editor"
+                    elif result[0] == "cancelled":
+                        dashboard_message = "Folder dialog cancelled"
+                    else:
+                        dashboard_active = False
+                        explorer.set_root(os.path.expanduser("~"))
+                        explorer.visible = True
+                        explorer.active = True
+                        root_dir = os.path.expanduser("~")
+                        quick_open = QuickOpen(root_dir, show_recent_on_empty=False)
+                        status = "System folder dialog unavailable — browsing home"
+                    continue
+                if key in ("n", "N"):
+                    # Folder-first New File workflow: pick a directory, type a
+                    # name, Enter creates it and opens the real file (spec §2).
+                    new_file_picker.open()
+                    dashboard_overlay = UI_NEW_FILE
+                    continue
+                if key in ("c", "C"):
+                    show_settings = True
+                    explorer.visible = False
+                    continue
+                if key in ("s", "S"):
+                    items = recent.get_recent()
+                    path = next((p for p in items if os.path.isfile(p)), None)
+                    if path:
+                        language, status = open_file_path(
+                            stdscr, buf, explorer, path,
+                            render_unsaved=lambda t: _draw_status_prompt(stdscr, t),
+                        )
+                        if status.startswith("Opened"):
+                            buf.configure_for_language(language)
+                            explorer.active = False
+                            dashboard_active = False
+                    else:
+                        status = "No recent file to restore"
+                    continue
+                if key in ("h", "H") or key == curses.KEY_F1:
+                    show_help = True
+                    help_scroll = 0
+                    continue
                 continue
-            continue
+            # A Quick Open / Recent / Settings / Help overlay is open over the
+            # dashboard: fall through to the shared frame + key path below so
+            # the overlay handlers receive the keys while the dashboard stays
+            # as the base frame behind the box.
         if buf.image_format is not None and image_view_active:
             meter.frame_end(frame_started)
             action = _image_viewer_frame(stdscr, buf, image_state)
@@ -710,7 +870,6 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             image_view_active = True
             status = "Image opened — viewer active"
             continue
-        stdscr.erase()
         height, width = stdscr.getmaxyx()
         text_height = height - 1  # reserve last row for status line
 
@@ -731,144 +890,203 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         # Combined left offset: explorer + settings panel
         left_offset = explorer_width + settings_panel_width
 
+        # Dirty-frame skip: while a Quick Open / Recent / Settings / Help
+        # overlay is open, repaint the whole frame only when its visible
+        # state changed.  Once the content settles the TUI does zero draw
+        # calls per poll, which removes the screen shutter while typing and
+        # stops the per-keystroke repaint churn.
+        ignore = False
+        overlay_open = (quick_open.visible or recent_picker.active
+                        or show_settings or show_help)
+        if not overlay_open:
+            overlay_last_sig = None
+        else:
+            if show_help and _help_sig_width != width:
+                _help_sig_width = width
+                _help_sig_total = len(build_help_lines(width))
+            sig = _overlay_signature(
+                quick_open, recent_picker, show_settings, settings_idx,
+                expanded_sections, show_help, help_scroll, _help_sig_total,
+                height, width)
+            ignore = sig == overlay_last_sig
+            if not ignore:
+                overlay_last_sig = sig
+
         # Draw file explorer if visible (not when settings panel is open)
-        if explorer.visible and not show_settings:
-            _draw_explorer(stdscr, explorer, text_height, explorer_width,
-                           icons_on)
-
-        # Draw settings panel (replaces explorer as left sidebar)
-        if show_settings:
-            _draw_settings_overlay(stdscr, settings_idx, settings_panel_width,
-                                   expanded_sections)
-
-        # Handle diff overlay early (covers full screen)
-        if git_panel and git_panel.visible and git_panel.mode == "diff":
-            if diff_viewer and not diff_viewer.diff_text:
-                diff_text = git_panel.get_selected_diff()
-                f = git_panel.selected_file()
-                title = f.path if f else "diff"
-                diff_viewer.load(diff_text, title=title)
-            if diff_viewer:
-                draw_diff_overlay(stdscr, diff_viewer, height, width)
-                stdscr.move(height - 1, 0)
-                status_line = format_status_bar(
-                    filename=buf.filename, modified=buf.modified,
-                    label=schema.language_label(language),
-                    cursor_y=buf.cursor_y, cursor_x=buf.cursor_x,
-                    line_count=len(buf.lines),
-                    width=width,
-                    git_branch=_git_branch, git_counts=_git_counts,
+        if not ignore:
+            if dashboard_active:
+                # The intact YUKI screen is the base under every overlay: the
+                # box is painted on top of the real dashboard and the terminal
+                # is refreshed exactly once (no blank editor page, no shutter).
+                dashboard.draw(
+                    stdscr,
+                    dashboard_selected,
+                    time.perf_counter() - dashboard_started,
+                    format_bytes(meter.rss),
+                    message=dashboard_message,
+                    refresh=False,
                 )
-                stdscr.addstr(height - 1, 0, status_line[:width - 1],
-                              curses.A_REVERSE | curses.A_BOLD)
+                if show_settings:
+                    _draw_settings_overlay(stdscr, settings_idx,
+                                           settings_panel_width,
+                                           expanded_sections)
+            else:
+                stdscr.erase()
+                if explorer.visible and not show_settings:
+                    _draw_explorer(stdscr, explorer, text_height,
+                                   explorer_width, icons_on)
+
+                # Draw settings panel (replaces explorer as left sidebar)
+                if show_settings:
+                    _draw_settings_overlay(stdscr, settings_idx,
+                                           settings_panel_width,
+                                           expanded_sections)
+
+                # Handle diff overlay early (covers full screen)
+                if git_panel and git_panel.visible and git_panel.mode == "diff":
+                    if diff_viewer and not diff_viewer.diff_text:
+                        diff_text = git_panel.get_selected_diff()
+                        f = git_panel.selected_file()
+                        title = f.path if f else "diff"
+                        diff_viewer.load(diff_text, title=title)
+                    if diff_viewer:
+                        draw_diff_overlay(stdscr, diff_viewer, height, width)
+                        stdscr.move(height - 1, 0)
+                        status_line = format_status_bar(
+                            filename=buf.filename, modified=buf.modified,
+                            label=schema.language_label(language),
+                            cursor_y=buf.cursor_y, cursor_x=buf.cursor_x,
+                            line_count=len(buf.lines),
+                            width=width,
+                            git_branch=_git_branch, git_counts=_git_counts,
+                        )
+                        try:
+                            stdscr.addstr(height - 1, 0, _safe_render(status_line[:width - 1]),
+                                          curses.A_REVERSE | curses.A_BOLD)
+                        except (curses.error, ValueError, UnicodeEncodeError):
+                            pass
+                        try:
+                            stdscr.move(buf.cursor_y - buf.scroll_y, 0)
+                        except curses.error:
+                            pass
+                        if frame_started:
+                            meter.frame_end(frame_started)
+                        continue
+
+                gutter_width = line_number_width(len(buf.lines)) + 3  # +1 for git gutter marker
+                text_width = max(1, width - left_offset - gutter_width - git_panel_width)
+
+                buf.update_scroll(text_height, text_width)
+
+                # Refresh gutter if buffer changed
+                if gutter and buf.filename:
+                    gutter.maybe_refresh(buf.get_text())
+
+                for row in range(text_height):
+                    line_idx = buf.scroll_y + row
+                    _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width, x_offset=left_offset)
+                    # Draw git gutter marker after line number
+                    if gutter and line_idx < len(buf.lines):
+                        mark = gutter.get_mark(line_idx + 1)  # 1-indexed
+                        if mark:
+                            draw_gutter_mark(stdscr, row, left_offset + line_number_width(len(buf.lines)) + 1, mark)
+                    if line_idx >= len(buf.lines):
+                        continue
+                    line = buf.lines[line_idx]
+                    _draw_line(
+                        stdscr, row, line, buf.scroll_x, text_width, language,
+                        x_offset=gutter_width + left_offset,
+                    )
+                    _highlight_selection(
+                        stdscr, row, line_idx, line, buf,
+                        scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width + left_offset,
+                    )
+                    _highlight_find_match(
+                        stdscr, row, line_idx, text_width, buf.scroll_x,
+                        gutter_width + left_offset,
+                    )
+
+                # Draw git panel on the RIGHT side (after editor content)
+                if git_panel and git_panel.visible:
+                    git_panel_x = left_offset + gutter_width + text_width
+                    draw_git_panel(stdscr, git_panel, text_height, git_panel_width,
+                                   x_offset=git_panel_x)
+
+                match = buf.matching_bracket()
+
+                # Refresh git info periodically (not every frame)
+                now_frame = time.time()
+                if now_frame - _git_refresh_time >= _git_refresh_interval:
+                    _git_refresh_time = now_frame
+                    project = root_dir if root_dir != "." else (os.path.dirname(buf.filename) if buf.filename else ".")
+                    if git.is_git_repo(project):
+                        _git_branch = git.get_branch(project)
+                        _git_counts = git.get_status_counts(project)
+                        # Also refresh git panel if visible
+                        if git_panel and git_panel.visible:
+                            git_panel.refresh()
+                    else:
+                        _git_branch = None
+                        _git_counts = {"modified": 0, "added": 0, "deleted": 0, "untracked": 0}
+
+                status_line = format_status_bar(
+                    filename=buf.filename,
+                    modified=buf.modified,
+                    label=schema.language_label(language),
+                    cursor_y=buf.cursor_y,
+                    cursor_x=buf.cursor_x,
+                    line_count=len(buf.lines),
+                    selecting=selecting,
+                    large_file_mode=buf.large_file_mode,
+                    match_pos=match,
+                    meter_label=meter.label(),
+                    extension_status=extensions.status(),
+                    transient_status=status,
+                    icon=icons.icon_for_language(schema.language_label(language), icons_on),
+                    width=width,
+                    git_branch=_git_branch,
+                    git_counts=_git_counts,
+                )
                 try:
-                    stdscr.move(buf.cursor_y - buf.scroll_y, 0)
+                    stdscr.addstr(height - 1, 0, _safe_render(status_line), curses.A_REVERSE)
+                except (curses.error, ValueError, UnicodeEncodeError):
+                    pass
+
+            if show_help:
+                _draw_help_overlay(stdscr, build_help_lines(width),
+                                   help_scroll)
+            if quick_open.visible:
+                _draw_quick_open_overlay(stdscr, quick_open)
+            else:
+                _qo_last_rect = None
+            if recent_picker.active:
+                _draw_recent_overlay(stdscr, recent_picker, height, width)
+
+            if (sug.visible and not (show_settings or show_help
+                                     or explorer.active or image_view_active)
+                    and not dashboard_active):
+                _draw_suggest_overlay(stdscr, sug, buf, left_offset, gutter_width,
+                                      text_width, height, width)
+            if (ghost is not None
+                    and (buf.cursor_y, buf.cursor_x) == ghost_anchor
+                    and not dashboard_active):
+                _draw_ghost(stdscr, buf, ghost, left_offset, gutter_width,
+                            text_width)
+
+            if quick_open.visible:
+                # Terminal caret goes inside the box, right after the typed
+                # text (never a hidden cursor behind the overlay).
+                _cr, _cc = _quick_open_cursor_col(quick_open, height, width)
+                try:
+                    stdscr.move(_cr, _cc)
                 except curses.error:
                     pass
-                if frame_started:
-                    meter.frame_end(frame_started)
-                continue
-
-        gutter_width = line_number_width(len(buf.lines)) + 3  # +1 for git gutter marker
-        text_width = max(1, width - left_offset - gutter_width - git_panel_width)
-
-        buf.update_scroll(text_height, text_width)
-
-        # Refresh gutter if buffer changed
-        if gutter and buf.filename:
-            gutter.maybe_refresh(buf.get_text())
-
-        for row in range(text_height):
-            line_idx = buf.scroll_y + row
-            _draw_gutter(stdscr, row, line_idx, len(buf.lines), gutter_width, x_offset=left_offset)
-            # Draw git gutter marker after line number
-            if gutter and line_idx < len(buf.lines):
-                mark = gutter.get_mark(line_idx + 1)  # 1-indexed
-                if mark:
-                    draw_gutter_mark(stdscr, row, left_offset + line_number_width(len(buf.lines)) + 1, mark)
-            if line_idx >= len(buf.lines):
-                continue
-            line = buf.lines[line_idx]
-            _draw_line(
-                stdscr, row, line, buf.scroll_x, text_width, language,
-                x_offset=gutter_width + left_offset,
-            )
-            _highlight_selection(
-                stdscr, row, line_idx, line, buf,
-                scroll_x=buf.scroll_x, width=text_width, x_offset=gutter_width + left_offset,
-            )
-            _highlight_find_match(
-                stdscr, row, line_idx, text_width, buf.scroll_x,
-                gutter_width + left_offset,
-            )
-
-        # Draw git panel on the RIGHT side (after editor content)
-        if git_panel and git_panel.visible:
-            git_panel_x = left_offset + gutter_width + text_width
-            draw_git_panel(stdscr, git_panel, text_height, git_panel_width,
-                           x_offset=git_panel_x)
-
-        match = buf.matching_bracket()
-
-        # Refresh git info periodically (not every frame)
-        now_frame = time.time()
-        if now_frame - _git_refresh_time >= _git_refresh_interval:
-            _git_refresh_time = now_frame
-            project = root_dir if root_dir != "." else (os.path.dirname(buf.filename) if buf.filename else ".")
-            if git.is_git_repo(project):
-                _git_branch = git.get_branch(project)
-                _git_counts = git.get_status_counts(project)
-                # Also refresh git panel if visible
-                if git_panel and git_panel.visible:
-                    git_panel.refresh()
-            else:
-                _git_branch = None
-                _git_counts = {"modified": 0, "added": 0, "deleted": 0, "untracked": 0}
-
-        status_line = format_status_bar(
-            filename=buf.filename,
-            modified=buf.modified,
-            label=schema.language_label(language),
-            cursor_y=buf.cursor_y,
-            cursor_x=buf.cursor_x,
-            line_count=len(buf.lines),
-            selecting=selecting,
-            large_file_mode=buf.large_file_mode,
-            match_pos=match,
-            meter_label=meter.label(),
-            extension_status=extensions.status(),
-            transient_status=status,
-            icon=icons.icon_for_language(schema.language_label(language), icons_on),
-            width=width,
-            git_branch=_git_branch,
-            git_counts=_git_counts,
-        )
-        try:
-            stdscr.addstr(height - 1, 0, status_line, curses.A_REVERSE)
-        except curses.error:
-            pass
-
-        if show_help:
-            _draw_help_overlay(stdscr, build_help_lines(width),
-                               help_scroll)
-        if quick_open.visible:
-            _draw_quick_open_overlay(stdscr, quick_open)
-        if recent_picker.active:
-            _draw_recent_overlay(stdscr, recent_picker, height, width)
-
-        if sug.visible and not (show_settings or show_help
-                                or explorer.active or image_view_active):
-            _draw_suggest_overlay(stdscr, sug, buf, left_offset, gutter_width,
-                                  text_width, height, width)
-        if ghost is not None and (buf.cursor_y, buf.cursor_x) == ghost_anchor:
-            _draw_ghost(stdscr, buf, ghost, left_offset, gutter_width,
-                        text_width)
-
-        stdscr.move(
-            buf.cursor_y - buf.scroll_y,
-            left_offset + gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
-        )
-        stdscr.refresh()
+            elif not dashboard_active:
+                stdscr.move(
+                    buf.cursor_y - buf.scroll_y,
+                    left_offset + gutter_width + min(buf.cursor_x - buf.scroll_x, max(text_width - 1, 0)),
+                )
+            stdscr.refresh()
         meter.frame_end(frame_started)
         status = ""
 
@@ -909,6 +1127,10 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
 
         # --- Mouse events (before all other key handling) ---
         if isinstance(key, tuple) and key[0] == "__mouse__":
+            if dashboard_active:
+                # The dashboard and its overlays don't use the mouse
+                # (buffer/gutter geometry isn't even defined on that base).
+                continue
             global _mouse_dragging, _last_click_time, _click_count
             _, mx, my, bstate = key
             # Convert screen coords → buffer coords.
@@ -1006,6 +1228,16 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
             # Scroll, deliberate dismissal; other keys are swallowed.
             total = len(build_help_lines(width))
             view_h = max(1, height - 2)
+            if key == "\x1b" and _is_ctrl_1(stdscr):
+                ok, msg = _leave_to_dashboard(
+                    stdscr, buf,
+                    render_unsaved=lambda t: _draw_status_prompt(stdscr, t))
+                if ok:
+                    show_help = False
+                    dashboard_active = True
+                else:
+                    status = msg
+                continue
             if key == curses.KEY_UP:
                 help_scroll = clamp_scroll(help_scroll, -1, total, view_h)
             elif key == curses.KEY_DOWN:
@@ -1070,6 +1302,15 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                     if _setting_key_group(k) == "theme":
                         _apply_active_theme()
                     _apply_font_family()
+            elif key == "\x1b" and _is_ctrl_1(stdscr):
+                ok, msg = _leave_to_dashboard(
+                    stdscr, buf,
+                    render_unsaved=lambda t: _draw_status_prompt(stdscr, t))
+                if ok:
+                    show_settings = False
+                    dashboard_active = True
+                else:
+                    status = msg
             elif key in ("\x1b", "\x10", "q"):
                 show_settings = False
             continue
@@ -1077,6 +1318,17 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         # Recent Files picker overlay (from the dashboard).
         if recent_picker.active:
             if key is None:
+                continue
+            if key == "\x1b" and _is_ctrl_1(stdscr):
+                ok, msg = _leave_to_dashboard(
+                    stdscr, buf,
+                    render_unsaved=lambda t: _draw_status_prompt(stdscr, t))
+                if ok:
+                    recent_picker.close()
+                    stdscr.timeout(-1)
+                    dashboard_active = True
+                else:
+                    status = msg
                 continue
             if key in ("\x1b", "q"):
                 recent_picker.close()
@@ -1114,11 +1366,25 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         if quick_open.visible:
             if key is None:
                 continue
+            if key == "\x1b" and _is_ctrl_1(stdscr):
+                ok, msg = _leave_to_dashboard(
+                    stdscr, buf,
+                    render_unsaved=lambda t: _draw_status_prompt(stdscr, t))
+                if ok:
+                    quick_open.close()
+                    stdscr.timeout(-1)
+                    status = ""
+                    dashboard_active = True
+                else:
+                    status = msg
+                continue
             if key in ("\x1b", "\x0f"):
                 quick_open.close()
                 stdscr.timeout(-1)
                 status = ""
+                dashboard_active = True  # already true from the dashboard
             elif key == "\n" or key == "\r":
+                empty_query = not quick_open.query.strip()
                 path = quick_open.selected_location()
                 if path:
                     quick_open.close()
@@ -1130,6 +1396,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                         root_dir = path
                         quick_open = QuickOpen(root_dir, show_recent_on_empty=False)
                         status = f"Project root: {path}"
+                        dashboard_active = False
                     else:
                         language, status = open_file_path(
                             stdscr, buf, explorer, path,
@@ -1139,11 +1406,19 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                             buf.configure_for_language(language)
                             explorer.active = False
                             recent.add_recent(path)
+                            dashboard_active = False
+                        else:
+                            dashboard_active = True
                 else:
                     quick_open.close()
                     stdscr.timeout(-1)
-                    status = ("No folder selected" if quick_open.mode == "folders"
-                              else "No file selected")
+                    if dashboard_active and empty_query:
+                        # Empty query + Enter on the dashboard overlay
+                        # returns to YUKI.
+                        status = ""
+                    else:
+                        status = ("No folder selected" if quick_open.mode == "folders"
+                                  else "No file selected")
             elif key == curses.KEY_UP:
                 quick_open.move_selection(-1)
             elif key == curses.KEY_DOWN:
@@ -1664,9 +1939,9 @@ def _draw_status_prompt(stdscr, text: str) -> None:
     """Render prompt text on the status row (used by interactive prompts)."""
     height, width = stdscr.getmaxyx()
     try:
-        stdscr.addstr(height - 1, 0, text[: width - 1].ljust(width - 1), curses.A_REVERSE)
+        stdscr.addstr(height - 1, 0, _safe_render(text[: width - 1].ljust(width - 1)), curses.A_REVERSE)
         stdscr.refresh()
-    except curses.error:
+    except (curses.error, ValueError, UnicodeEncodeError):
         pass
 
 
@@ -2032,7 +2307,7 @@ def _draw_help_overlay(stdscr, lines, offset=0):
     def put(row, col, text, attr=0):
         try:
             stdscr.addstr(row, col, text[:width - col], attr)
-        except curses.error:
+        except (curses.error, ValueError, UnicodeEncodeError):
             pass
 
     title = " stdedit help - q/Esc/Enter close \u00b7 arrows scroll "
@@ -2111,8 +2386,8 @@ def _draw_suggest_overlay(stdscr, sug, buf, left_offset, gutter_width,
 
     def put(row, col, text, attr=0):
         try:
-            stdscr.addstr(row, col, text[: max(0, width - col)], attr)
-        except curses.error:
+            stdscr.addstr(row, col, _safe_render(text)[:width - col], attr)
+        except (curses.error, ValueError, UnicodeEncodeError):
             pass
 
     put(top, left, "\u250c" + "\u2500" * (inner_w - 1) + "\u2510", curses.A_REVERSE)
@@ -2147,8 +2422,8 @@ def _draw_ghost(stdscr, buf, ghost, left_offset, gutter_width, text_width) -> No
     if not slice_text:
         return
     try:
-        stdscr.addstr(row, col, slice_text, curses.A_DIM)
-    except curses.error:
+        stdscr.addstr(row, col, _safe_render(slice_text), curses.A_DIM)
+    except (curses.error, ValueError, UnicodeEncodeError):
         pass
 
 
@@ -2271,8 +2546,8 @@ def _draw_recent_overlay(stdscr, picker: RecentPicker, height: int, width: int) 
 
     def put(row, col, text, attr=0):
         try:
-            stdscr.addstr(row, col, text[:width - col], attr)
-        except curses.error:
+            stdscr.addstr(row, col, _safe_render(text)[:width - col], attr)
+        except (curses.error, ValueError, UnicodeEncodeError):
             pass
 
     put(top, left, "\u250c" + " RECENT FILES ".center(inner_w - 2)[:inner_w - 2]
@@ -2307,17 +2582,49 @@ def _draw_recent_overlay(stdscr, picker: RecentPicker, height: int, width: int) 
     put(bottom, left, "\u2514" + "\u2500" * max(0, inner_w - 2) + "\u2518", curses.A_DIM)
 
 
-def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
-    """Paint a centered bordered quick-open box with fuzzy results."""
-    height, width = stdscr.getmaxyx()
+def _quick_open_geometry(qo: QuickOpen, height: int, width: int) -> tuple:
+    """Shared Quick Open box geometry for drawing AND terminal-caret math."""
     items = qo.get_display_items(limit=max(1, height - 6))
     inner_w = max(40, min(60, width * 60 // 100))
     inner_w = min(inner_w, width - 2)
     total = len(items)
     view_h = max(1, min(total, height - 6))
-    box_h = view_h + 4  # title + input + separator + items + bottom
+    box_h = view_h + 5  # title + input + separator + items + hint + bottom
     top = max(0, (height - box_h) // 2)
     left = max(0, (width - inner_w) // 2)
+    return items, top, left, inner_w, view_h, box_h
+
+
+def _quick_open_cursor_col(qo: QuickOpen, height: int, width: int) -> tuple[int, int]:
+    """(row, col) of the ``|`` caret inside the search input box.
+
+    The caret sits on the input row, immediately after whatever has been
+    typed (a bare ``|`` when the query is empty), so the block cursor is
+    visible inside the box instead of a hidden editor position.
+    """
+    _, top, left, inner_w, _, _ = _quick_open_geometry(qo, height, width)
+    col = left + 2 + min(len(qo.query), inner_w - 3)
+    return top + 1, col
+
+
+_qo_last_rect: tuple[int, int, int, int] | None = None
+
+
+def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
+    """Paint a centered bordered quick-open box over the current base frame.
+
+    The input row embeds a ``|`` caret right after the typed text, a dim
+    divider separates it from the results, a hint row lists the keys, and
+    the bottom border is clipped by ``put`` so it can never run off-screen.
+
+    When the result count changes the box relocates (size/centre shift), so
+    the previously drawn rectangle is erased as well: cursors-only redraws
+    never blank old cells, which would otherwise leave ghost pixels behind.
+    """
+    global _qo_last_rect
+    height, width = stdscr.getmaxyx()
+    items, top, left, inner_w, view_h, box_h = _quick_open_geometry(
+        qo, height, width)
 
     def put(row, col, text, attr=0):
         try:
@@ -2325,22 +2632,37 @@ def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
         except curses.error:
             pass
 
+    # Erase the old box location (and the new one) before repainting so a
+    # shrinking or moving box never leaves stale cells on screen.
+    eraser = " " * inner_w
+    for rtop, rleft, rinner_w, rbox_h in ((top, left, inner_w, box_h),
+                                          *((_qo_last_rect,) if _qo_last_rect else ())):
+        for row in range(rtop, min(rtop + rbox_h, height)):
+            put(row, rleft, eraser[:rinner_w])
+    _qo_last_rect = (top, left, inner_w, box_h)
+
     # Title
     folder_mode = qo.mode == "folders"
     title = " Open Folder " if folder_mode else " Open File "
     put(top, left, "\u250c" + title.center(inner_w - 2)[:inner_w - 2] + "\u2510",
         curses.A_REVERSE)
-    # Input line
+    # Input line: the vertical-bar caret comes immediately after the typed
+    # text, inside the box (a bare `|` when the query is empty).
     put(top + 1, left, "\u2502", curses.A_DIM)
-    query_display = qo.query + " "
-    padding = inner_w - 2 - len(query_display)
-    put(top + 1, left + 1, " " + query_display + " " * max(0, padding), curses.A_UNDERLINE)
+    caret = qo.query + "|"
+    if len(caret) > inner_w - 2:
+        caret = caret[: inner_w - 2]
+    text = " " + caret
+    padding = max(0, inner_w - 2 - len(text))
+    put(top + 1, left + 1, text + " " * padding, curses.A_UNDERLINE)
     put(top + 1, left + inner_w - 1, "\u2502", curses.A_DIM)
     # Separator
-    put(top + 2, left, "\u251c" + "\u2500" * (inner_w - 2) + "\u2524", curses.A_DIM)
-    # Items
+    put(top + 2, left, "\u251c" + "\u2500" * (inner_w - 2) + "\u2524",
+        curses.A_DIM)
+    # Items (or a status/hint message while there are no results)
     kind_raw = "folders" if folder_mode else "files"
     if not items:
+        row = top + 3
         if qo.query:
             if qo.loading:
                 msg = f" Searching...  ({len(qo.files)} {kind_raw} indexed)"
@@ -2362,16 +2684,14 @@ def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
                     msg = " Press Enter to open this folder as project root"
                 else:
                     msg = " No matches"
-            put(top + 3, left + 1, msg, curses.A_DIM)
+            put(row, left + 1, msg, curses.A_DIM)
         else:
             empty_hint = (f" Type to search {kind_raw}..." if folder_mode
                           else f" Recent {kind_raw}" if qo.show_recent_on_empty
                           else f" Type to search {kind_raw}...")
-            put(top + 3, left + 1, empty_hint, curses.A_DIM)
+            put(row, left + 1, empty_hint, curses.A_DIM)
     else:
-        for i, (display_path, is_sel) in enumerate(items):
-            if i >= view_h:
-                break
+        for i, (display_path, is_sel) in enumerate(items[:view_h]):
             # Show just the path relative to root if possible
             short = display_path
             if short.startswith(qo.root_dir):
@@ -2386,7 +2706,13 @@ def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
                 short = "..." + short[-(avail - 3):]
             marker = "\u25b6 " if is_sel else "   "
             attr = curses.A_REVERSE if is_sel else 0
-            put(top + 3 + i, left + 1, (marker + short)[:inner_w - 2], attr)
+            pad = max(0, inner_w - 2 - len(marker) - len(short))
+            put(top + 3 + i, left + 1,
+                (marker + short + " " * pad)[:inner_w - 2], attr)
+    # Hint row
+    hint = " \u2191/\u2193 select \u2192 Enter open \u2192 Esc back"
+    pad = max(0, inner_w - 2 - len(hint))
+    put(top + 3 + view_h, left + 1, hint + " " * pad, curses.A_DIM)
     # Bottom border
     put(top + box_h - 1, left,
         "\u2514" + "\u2500" * (inner_w - 2) + "\u2518")
@@ -2513,6 +2839,30 @@ def _yes_no_prompt(read_key, render, message) -> bool:
                 return False
 
 
+def _leave_to_dashboard(stdscr, buf, render_unsaved=None) -> tuple[bool, str]:
+    """Return ``(True, "")`` when switching into dashboard mode is allowed.
+
+    A dirty document is run through the project's existing
+    Save / Discard / Cancel policy first; ``cancel`` keeps the editor where
+    it is.  Abandoning a clean (or just-saved) buffer is allowed.
+    """
+    if buf.modified:
+        choice = _unsaved_changes_prompt(
+            lambda: _get_key(stdscr),
+            render_unsaved or (lambda t: _draw_status_prompt(stdscr, t)),
+        )
+        if choice == "save":
+            try:
+                buf.save()
+            except ValueError:
+                return False, "No filename — cannot save"
+            except OSError as exc:
+                return False, f"Could not save: {exc}"
+        elif choice == "cancel":
+            return False, "Cancelled"
+    return True, ""
+
+
 def _quit_dialog_choices(modified: bool, can_save: bool) -> list[tuple[str, str]]:
     """Return the quit-dialog buttons as ``(label, action)`` pairs.
 
@@ -2594,8 +2944,8 @@ def _draw_quit_dialog(stdscr, title: str, body: list[str],
 
     def put(row, col, text, attr=0):
         try:
-            stdscr.addstr(row, col, text[:width - col], attr)
-        except curses.error:
+            stdscr.addstr(row, col, _safe_render(text)[:width - col], attr)
+        except (curses.error, ValueError, UnicodeEncodeError):
             pass
 
     fill = max(inner_w - len(title) - 2, 0)
@@ -2661,6 +3011,12 @@ def open_file_path(stdscr, buf: Buffer, explorer: Optional[FileExplorer], path: 
         buf.load(path)
     except Exception as exc:
         return current_language, f"Error opening file: {exc}"
+    if buf.load_error:
+        # Binary/non-text or unreadable file: the buffer is inert; surface
+        # the reason as the status instead of opening an empty document.
+        err = buf.load_error
+        buf.load_error = None
+        return current_language, err
     language = schema.detect_language(buf.filename or "")
     if explorer is not None:
         abs_path = os.path.abspath(path)
@@ -2817,8 +3173,8 @@ def _draw_explorer(stdscr, explorer: FileExplorer, height: int, width: int,
             attr |= curses.A_BOLD | curses.A_UNDERLINE
 
         try:
-            stdscr.addstr(item_offset + i, 0, display.ljust(width - 2)[:width - 2], attr)
-        except curses.error:
+            stdscr.addstr(item_offset + i, 0, _safe_render(display.ljust(width - 2)[:width - 2]), attr)
+        except (curses.error, ValueError, UnicodeEncodeError):
             pass
 
 
@@ -2874,7 +3230,7 @@ def _highlight_find_match(stdscr, row, line_idx, width, scroll_x, x_offset) -> N
             stdscr.addstr(row, x_offset + vis_start,
                           " " * (vis_end - vis_start),
                           curses.A_REVERSE | curses.A_BOLD)
-        except curses.error:
+        except (curses.error, ValueError, UnicodeEncodeError):
             pass
 
 
@@ -2883,8 +3239,8 @@ def _draw_line(stdscr, row: int, line: str, scroll_x: int, width: int, language:
     spans = schema.tokenize(line, language)
     if not spans:
         try:
-            stdscr.addstr(row, x_offset, line[scroll_x : scroll_x + width])
-        except curses.error:
+            stdscr.addstr(row, x_offset, _safe_render(line[scroll_x : scroll_x + width]))
+        except (curses.error, ValueError, UnicodeEncodeError):
             pass
         return
 
@@ -2904,6 +3260,7 @@ def _draw_line(stdscr, row: int, line: str, scroll_x: int, width: int, language:
 def _addstr_clip(stdscr, row: int, col: int, text: str, scroll_x: int, width: int, attr: int, x_offset: int = 0) -> int:
     """Write `text` at logical column `col`, respecting horizontal scroll,
     and return the next logical column. Screen writes are clipped to width."""
+    text = _safe_render(text)
     next_col = col + len(text)
     screen_start = col - scroll_x
     screen_end = next_col - scroll_x
@@ -2914,6 +3271,6 @@ def _addstr_clip(stdscr, row: int, col: int, text: str, scroll_x: int, width: in
     if visible_end > visible_start:
         try:
             stdscr.addstr(row, x_offset + max(0, screen_start), text[visible_start:visible_end], attr)
-        except curses.error:
+        except (curses.error, ValueError, UnicodeEncodeError):
             pass
     return next_col

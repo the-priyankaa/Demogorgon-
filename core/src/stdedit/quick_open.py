@@ -7,11 +7,68 @@ finishes.
 """
 from __future__ import annotations
 
+import ctypes
+import gc
 import os
+import sys
 import threading
 from typing import Iterable, List, Tuple
 
 from . import recent
+
+# Directories that are never indexed — pure junk / huge and never the file
+# the user is searching for.
+PRUNE_NAMES = {".cache", "Caches", ".Trash", "Trash", ".thumbnails"}
+
+_LIBC = None
+
+
+def _get_libc():
+    """Resolve the C library once; ``None`` when unavailable (non-glibc)."""
+    global _LIBC
+    if _LIBC is None:
+        try:
+            _LIBC = ctypes.CDLL(None)
+            _LIBC.malloc_trim
+        except Exception:
+            try:
+                _LIBC = ctypes.CDLL("libc.so.6")
+                _LIBC.malloc_trim
+            except Exception:
+                _LIBC = False
+    return _LIBC if _LIBC is not False else None
+
+
+def _free_cached_memory() -> None:
+    """Return allocator-cached RSS to the OS after a large index is dropped.
+
+    Python and glibc keep freed pages in their allocators, so a process
+    monitor still reports the memory as resident after :meth:`QuickOpen.close`
+    clears a big scan.  ``gc.collect()`` plus a guarded ``malloc_trim(0)``
+    (Linux/glibc only) reclaims those pages.  A pure no-op everywhere else.
+    """
+    gc.collect()
+    if sys.platform != "linux":
+        return
+    libc = _get_libc()
+    if libc is None:
+        return
+    try:
+        libc.malloc_trim(0)
+    except Exception:
+        pass
+
+# Top-level names that hold per-app config even though they are not dotted
+# (macOS Library/Applications, Windows AppData).  Anything starting with "."
+# below the search root is treated as config too.
+SECONDARY_ROOT_NAMES = {
+    "AppData", "Application Data", "Local Settings", "Library", "Applications",
+}
+
+# Ranking constants: tier-0 (visible folder) hits always outrank tier-1
+# (config/hidden) hits, and closer files beat deeper ones for equal matches.
+TIER_BONUS = 1000.0
+DEPTH_PENALTY = 2.5
 
 
 def _normalize_excludes(exclude_roots: list[str] | None) -> list[str]:
@@ -23,6 +80,28 @@ def _is_excluded(path: str, excluded: list[str]) -> bool:
     return any(path == ex or path.startswith(ex + os.sep) for ex in excluded)
 
 
+def _classify(root_dir: str, path: str) -> tuple[int, int]:
+    """Return ``(tier, depth)`` for *path* relative to *root_dir*.
+
+    tier 0 = visible top-level segment (normal user folder/file).
+    tier 1 = config/aux: dot-prefixed top-level segment (``.config``,
+    ``.ssh``, …) or a platform config root name (``Library``, ``AppData``).
+
+    depth is the number of path components below *root_dir* (0 for a
+    root-level entry) and drives the "nearest file first" ranking.
+    """
+    rel = os.path.relpath(path, root_dir)
+    if rel == os.curdir:
+        return 0, 0
+    segments = rel.split(os.sep)
+    top = segments[0]
+    if top.startswith(".") or top in SECONDARY_ROOT_NAMES:
+        tier = 1
+    else:
+        tier = 0
+    return tier, len(segments) - 1
+
+
 def _iter_file_index(
     root_dir: str,
     exclude_roots: list[str] | None = None,
@@ -32,6 +111,10 @@ def _iter_file_index(
 
     With *dirs_only* True, directories are yielded instead of files (which is
     how the "Open Folder" dashboard action finds folders by name).
+
+    Traversal is ordered so normal (visible) directories are fully walked
+    before hidden/config ones: the index cap therefore fills with the user's
+    real folders first, and config subtrees always contribute last.
     """
     from .explorer import FileExplorer  # deferred to avoid circular imports
 
@@ -47,9 +130,9 @@ def _iter_file_index(
 
         kept_dirs = []
         for d in dirnames:
-            if d in ignore or any(d.endswith(s) for s in ignore_suffixes):
+            if d in ignore or d in PRUNE_NAMES:
                 continue
-            if d.startswith(".") and d not in {".config"}:
+            if any(d.endswith(s) for s in ignore_suffixes):
                 continue
             full = os.path.join(dirpath, d)
             if _is_excluded(full, excluded):
@@ -57,7 +140,8 @@ def _iter_file_index(
             kept_dirs.append(d)
             if dirs_only:
                 yield full
-        dirnames[:] = kept_dirs
+        # Visible dirs before hidden/config dirs, alphabetical within each.
+        dirnames[:] = sorted(kept_dirs, key=lambda d: (d.startswith("."), d))
 
         if dirs_only:
             continue
@@ -136,19 +220,32 @@ def fuzzy_search(query: str, files: List[str], limit: int = 20) -> List[Tuple[fl
 
 
 def _fuzzy_search_lowered(
-    query: str, files: Iterable[str], lowers: Iterable[str], limit: int = 20
+    query: str, files: Iterable[str], lowers: Iterable[str], limit: int = 20,
+    tiers: Iterable[int] | None = None, depths: Iterable[float] | None = None,
 ) -> List[Tuple[float, str]]:
     """Score *files* reusing precomputed lowercase forms.
 
     Identical scoring to :func:`fuzzy_search` but avoids re-lowercasing every
     path on each keystroke, which dominates allocation and CPU cost.
+
+    When *tiers* / *depths* are given, indexing results learn the "nearest
+    first, config last" ranking: tier-0 (visible folder) hits always outrank
+    tier-1 (config/hidden) hits via :data:`TIER_BONUS`, and shallower paths
+    outrank deeper ones via :data:`DEPTH_PENALTY`.  Both are optional so the
+    public :func:`fuzzy_search` path keeps its exact historical behaviour.
     """
     if not query:
         return []
 
     q_lower = query.lower()
     scored: list[tuple[float, str]] = []
+    tier_iter = iter(tiers) if tiers is not None else None
+    depth_iter = iter(depths) if depths is not None else None
     for path, full_lower in zip(files, lowers):
+        # Advance the tier/depth iterators in lockstep with *every* path so a
+        # non-matching file never shifts later files onto the wrong tier.
+        tier = next(tier_iter) if tier_iter is not None else None
+        depth = next(depth_iter) if depth_iter is not None else None
         qi = 0
         matches: list[int] = []
         for i, ch in enumerate(full_lower):
@@ -180,6 +277,9 @@ def _fuzzy_search_lowered(
             score += 30.0
 
         score -= len(path) * 0.01
+        if tier is not None:
+            score += TIER_BONUS if tier == 0 else 0.0
+            score -= depth * DEPTH_PENALTY
         scored.append((score, path))
 
     scored.sort(key=lambda x: (-x[0], x[1]))
@@ -199,6 +299,10 @@ class QuickOpen:
 
     BATCH_SIZE = 256
     MAX_FILES = 40_000
+
+    # A scan releases a large parallel index on close(); above this many
+    # files the allocator-cached RSS is worth returning to the OS.
+    CLOSE_TRIM_THRESHOLD = 4_000
 
     def __init__(
         self,
@@ -221,6 +325,8 @@ class QuickOpen:
         self.capped: bool = False
         self.scoring: bool = False
         self._lowers: list[str] = []
+        self.tiers: list[int] = []
+        self.depths: list[float] = []
         self._scan_thread: threading.Thread | None = None
         self._results_thread: threading.Thread | None = None
         self._scan_stop = threading.Event()
@@ -232,21 +338,24 @@ class QuickOpen:
         self._last_version = 0
         self._lock = threading.RLock()
 
-    def _flush_scan_batch(self, batch: list[tuple[str, str]], generation: int,
+    def _flush_scan_batch(self, batch: list[tuple[str, str, int, int]],
+                          generation: int,
                           stop_event: threading.Event) -> None:
         if not batch:
             return
         with self._lock:
             if generation != self._generation or stop_event.is_set():
                 return
-            self.files.extend(p for p, _ in batch)
-            self._lowers.extend(l for _, l in batch)
+            self.files.extend(p for p, _, _, _ in batch)
+            self._lowers.extend(l for _, l, _, _ in batch)
+            self.tiers.extend(t for _, _, t, _ in batch)
+            self.depths.extend(d for _, _, _, d in batch)
             self._files_version += 1
             self._query_wake.set()
 
     def _scan_worker(self, stop_event: threading.Event, generation: int) -> None:
         try:
-            batch: list[tuple[str, str]] = []
+            batch: list[tuple[str, str, int, int]] = []
             count = 0
             for path in _iter_file_index(
                 self.root_dir, self.exclude_roots,
@@ -259,7 +368,8 @@ class QuickOpen:
                         if generation == self._generation and not stop_event.is_set():
                             self.capped = True
                     break
-                batch.append((path, path.lower()))
+                tier, depth = _classify(self.root_dir, path)
+                batch.append((path, path.lower(), tier, depth))
                 count += 1
                 if len(batch) >= self.BATCH_SIZE:
                     self._flush_scan_batch(batch, generation, stop_event)
@@ -267,9 +377,13 @@ class QuickOpen:
             self._flush_scan_batch(batch, generation, stop_event)
             with self._lock:
                 if generation == self._generation and not stop_event.is_set():
-                    pairs = sorted(zip(self.files, self._lowers))
-                    self.files = [p for p, _ in pairs]
-                    self._lowers = [l for _, l in pairs]
+                    pairs = sorted(
+                        zip(self.files, self._lowers, self.tiers, self.depths),
+                        key=lambda p: p[0])
+                    self.files = [p[0] for p in pairs]
+                    self._lowers = [p[1] for p in pairs]
+                    self.tiers = [p[2] for p in pairs]
+                    self.depths = [p[3] for p in pairs]
                     self._files_version += 1
                     self.loading = False
                     self._query_wake.set()
@@ -301,9 +415,12 @@ class QuickOpen:
                 query = self.query
                 files = tuple(self.files)
                 lowers = tuple(self._lowers)
+                tiers = tuple(self.tiers)
+                depths = tuple(self.depths)
                 version = self._files_version
             if query:
-                results = _fuzzy_search_lowered(query, files, lowers)
+                results = _fuzzy_search_lowered(
+                    query, files, lowers, tiers=tiers, depths=depths)
             else:
                 results = []
             with self._lock:
@@ -323,6 +440,8 @@ class QuickOpen:
             generation = self._generation
             self.files = []
             self._lowers = []
+            self.tiers = []
+            self.depths = []
             self.query = ""
             self.results = []
             self.selected_idx = 0
@@ -365,6 +484,7 @@ class QuickOpen:
         self._scan_thread = None
         self._results_thread = None
         with self._lock:
+            trim = len(self.files) >= self.CLOSE_TRIM_THRESHOLD
             self.visible = False
             self.query = ""
             self.results = []
@@ -373,8 +493,14 @@ class QuickOpen:
             self.scoring = False
             self.files = []
             self._lowers = []
+            self.tiers = []
+            self.depths = []
             self._files_version = 0
             self._last_version = 0
+        if trim:
+            # Return the dropped index's cached pages to the OS so the RAM
+            # meter / task manager reflects the search box being closed.
+            _free_cached_memory()
 
     def update_query(self, query: str) -> None:
         """Record a new query without blocking the caller.

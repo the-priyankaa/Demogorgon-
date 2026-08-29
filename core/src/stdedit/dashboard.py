@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import curses
 
 from . import recent
+from .render import safe_render
 
 
 
@@ -35,13 +36,16 @@ ACTIONS = [
     ("⌕", "F", "Find File", "Search and open a file"),
     ("▣", "D", "Open Folder", "Search and open a folder"),
     ("▤", "O", "Open Project", "Browse a folder in the file tree"),
-    ("□", "N", "New File", "Start editing a new file"),
+    ("□", "N", "New File", "Pick a folder, type a name, create it"),
     ("◷", "R", "Recent Files", "Open recently edited files"),
+    ("⇶", "E", "Extensions", "List available extensions"),
     ("↻", "S", "Restore Session", "Open the most recent file"),
     ("⚙", "C", "Settings", "Edit configuration"),
     ("?", "H", "Help", "Keyboard reference (F1)"),
     ("⇥", "Q", "Quit", "Exit Yuki"),
 ]
+
+MAX_ACTIONS = len(ACTIONS)
 
 TIPS = (
     "Stay lazy. Let Yuki\ndo the heavy lifting.",
@@ -87,8 +91,8 @@ def safe_addstr(stdscr, y: int, x: int, text: str, attr: int = 0, width: int | N
     try:
         if width is not None:
             text = text[:max(0, width)]
-        stdscr.addstr(y, x, text, attr)
-    except curses.error:
+        stdscr.addstr(y, x, safe_render(text), attr)
+    except (curses.error, ValueError, UnicodeEncodeError):
         pass
 
 
@@ -294,7 +298,7 @@ def _draw_shortcuts(stdscr, r: Rect) -> None:
     if r.h <= 0:
         return
     _box(stdscr, r, "SHORTCUTS")
-    rows = ["<Enter>/<Space> : Activate", "F        : Find File", "D        : Open Folder", "O        : Open Project", "N        : New File", "R        : Recent Files", "S        : Restore Session", "C        : Settings", "H / F1   : Help", "Q        : Quit"]
+    rows = ["<Enter>/<Space> : Activate", "F        : Find File", "D        : Open Folder", "O        : Open Project", "N        : New File", "R        : Recent Files", "E        : Extensions", "S        : Restore Session", "C        : Settings", "H / F1   : Help", "Q        : Quit", "Ctrl+1    : YUKI"]
     for i, line in enumerate(rows[: max(0, r.h - 2)]):
         safe_addstr(stdscr, r.y + 1 + i, r.x + 2, _truncate(line, r.w - 4), cp(GREEN_PAIR), r.w - 4)
 
@@ -311,8 +315,15 @@ def _draw_tip(stdscr, r: Rect) -> None:
 
 
 def draw(stdscr, selected: int, uptime: float, ram_label: str, project: str = "none",
-         message: str = "") -> None:
-    """Draw the dashboard at the current terminal dimensions."""
+         message: str = "", refresh: bool = True) -> None:
+    """Draw the dashboard at the current terminal dimensions.
+
+    ``refresh`` defaults to True so single-call wrappers keep working.  Set
+    it to False when the caller composes another overlay on top of this frame
+    and issues the ``stdscr.refresh()`` once at the end (one-frame rendering
+    — never paint the dashboard and an overlay with two separate refresh()es,
+    which causes a visible camera-shutter flicker).
+    """
     height, width = stdscr.getmaxyx()
     init_colors()
     stdscr.erase()
@@ -325,11 +336,12 @@ def draw(stdscr, selected: int, uptime: float, ram_label: str, project: str = "n
     _draw_recent(stdscr, boxes["recent"])
     _draw_shortcuts(stdscr, boxes["shortcuts"])
     _draw_tip(stdscr, boxes["tip"])
-    status = "NORMAL   no project   •   Enter selects   •   ↑↓ navigate   •   Q quits"
+    status = f"NORMAL   no project   •   Enter selects   •   ↑↓ navigate   •   Q quits"
     if message:
         status = f"{message}   •   {status}"
     safe_addstr(stdscr, height - 1, 2, _truncate(status, max(0, width - 4)), cp(GREEN_REVERSE_PAIR, curses.A_BOLD))
-    stdscr.refresh()
+    if refresh:
+        stdscr.refresh()
 
 
 def action_count() -> int:

@@ -1,6 +1,7 @@
 import curses
 import os
 import unittest
+from unittest import mock
 
 from stdedit.tui import (
     _get_key,
@@ -22,6 +23,11 @@ from stdedit.tui import (
     _forget_image_pixels,
     RecentPicker,
     _draw_recent_overlay,
+    _is_ctrl_1,
+    _leave_to_dashboard,
+    _overlay_signature,
+    _quick_open_cursor_col,
+    _quick_open_geometry,
 )
 from stdedit.buffer import Buffer
 from stdedit import suggest
@@ -510,6 +516,12 @@ class _FakeStdscr:
 
     def getch(self):
         return self._items.pop(0) if self._items else -1
+
+    def nodelay(self, flag):
+        pass
+
+    def ungetch(self, ch):
+        self._items.insert(0, ch)
 
 
 class TestBracketedPaste(unittest.TestCase):
@@ -1328,6 +1340,115 @@ class TestDrawQuickOpenOverlay(unittest.TestCase):
         self.assertIn("Type to search folders", texts)
 
 
+class TestQuickOpenCaret(unittest.TestCase):
+    def _qo(self, query):
+        qo = QuickOpen("/tmp")
+        qo.visible = True
+        qo.query = query
+        qo.results = []
+        qo.selected_idx = 0
+        qo.loading = False
+        qo.scan_error = None
+        qo.capped = False
+        qo.scoring = False
+        return qo
+
+    def test_caret_sits_after_typed_text_inside_box(self):
+        qo = self._qo("abc")
+        row, col = _quick_open_cursor_col(qo, 24, 80)
+        _, top, left, inner_w, _, _ = _quick_open_geometry(qo, 24, 80)
+        self.assertEqual(row, top + 1)  # input row
+        self.assertEqual(col, left + 2 + len(qo.query))
+        self.assertTrue(left < col < left + inner_w - 1)
+
+    def test_typing_moves_caret_right(self):
+        qo = self._qo("a")
+        _, short = _quick_open_cursor_col(qo, 24, 80)
+        qo.query = "ab"
+        _, longer = _quick_open_cursor_col(qo, 24, 80)
+        self.assertGreater(longer, short)
+
+    def test_bare_pipe_over_empty_query(self):
+        qo = self._qo("")
+        _, col = _quick_open_cursor_col(qo, 24, 80)
+        _, _, left, _, _, _ = _quick_open_geometry(qo, 24, 80)
+        self.assertEqual(col, left + 2)  # " |" — the bare caret slot
+
+
+class TestOverlaySignature(unittest.TestCase):
+    def _qo(self, query=""):
+        qo = QuickOpen("/tmp")
+        qo.visible = True
+        qo.query = query
+        qo.results = []
+        qo.selected_idx = 0
+        qo.loading = False
+        qo.scan_error = None
+        qo.capped = False
+        qo.scoring = False
+        return qo
+
+    def test_idle_frame_signature_is_stable(self):
+        qo = self._qo("abc")
+        rec = RecentPicker()
+        first = _overlay_signature(qo, rec, False, 0, {}, False, 0, 0, 24, 80)
+        second = _overlay_signature(qo, rec, False, 0, {}, False, 0, 0, 24, 80)
+        self.assertEqual(first, second)
+
+    def test_typing_changes_signature(self):
+        qo = self._qo("abc")
+        rec = RecentPicker()
+        before = _overlay_signature(qo, rec, False, 0, {}, False, 0, 0, 24, 80)
+        qo.query = "abcd"
+        after = _overlay_signature(qo, rec, False, 0, {}, False, 0, 0, 24, 80)
+        self.assertNotEqual(before, after)
+
+    def test_results_and_selection_change_signature(self):
+        qo = self._qo("t")
+        rec = RecentPicker()
+        before = _overlay_signature(qo, rec, False, 0, {}, False, 0, 0, 24, 80)
+        qo.results = [(0.9, "/tmp/t.txt", True)]
+        qo.selected_idx = 0
+        mid = _overlay_signature(qo, rec, False, 0, {}, False, 0, 0, 24, 80)
+        qo.selected_idx = 0
+        qo.results = [(0.9, "/tmp/t.txt", True), (0.5, "/tmp/t2.py", False)]
+        after = _overlay_signature(qo, rec, False, 0, {}, False, 0, 0, 24, 80)
+        self.assertNotEqual(before, mid)
+        self.assertNotEqual(mid, after)
+
+    def test_overlay_open_close_changes_signature(self):
+        qo = self._qo()
+        rec = RecentPicker()
+        closed = _overlay_signature(qo, rec, False, 0, {}, False, 0, 0, 24, 80)
+        rec.active = True
+        rec.entries = ["/tmp/a"]
+        opened = _overlay_signature(qo, rec, False, 0, {}, False, 0, 0, 24, 80)
+        self.assertNotEqual(closed, opened)
+        rec.active = False
+        reopened = _overlay_signature(qo, rec, False, 0, {}, False, 0, 0, 24, 80)
+        self.assertEqual(reopened, closed)
+
+    def test_settings_state_changes_signature(self):
+        from stdedit import settings as settings_mod
+        qo = self._qo()
+        rec = RecentPicker()
+        s1 = _overlay_signature(qo, rec, True, 0, {}, False, 0, 0, 24, 80)
+        s2 = _overlay_signature(qo, rec, True, 3, {"THEME": True}, False, 0, 0, 24, 80)
+        self.assertNotEqual(s1, s2)
+        with mock.patch.object(settings_mod, "get", return_value=False):
+            s3 = _overlay_signature(qo, rec, True, 3, {"THEME": True}, False, 0, 0, 24, 80)
+        with mock.patch.object(settings_mod, "get", return_value=True):
+            s4 = _overlay_signature(qo, rec, True, 3, {"THEME": True}, False, 0, 0, 24, 80)
+        self.assertNotEqual(s3, s4)
+
+    def test_help_scroll_changes_signature(self):
+        qo = self._qo()
+        rec = RecentPicker()
+        s1 = _overlay_signature(qo, rec, False, 0, {}, True, 0, 10, 24, 80)
+        s2 = _overlay_signature(qo, rec, False, 0, {}, True, 4, 10, 24, 80)
+        self.assertNotEqual(s1, s2)
+
+
 class TestForgetImagePixels(unittest.TestCase):
     def test_drops_pixels_and_error_keeps_view(self):
         st = {
@@ -1518,6 +1639,115 @@ class TestAutoSaveOnEdit(unittest.TestCase):
         saved, err = _auto_save_on_edit(buf)
         self.assertFalse(saved)
         self.assertIn("read-only", err)
+
+
+class TestCtrl1Recognition(unittest.TestCase):
+    """CSI-u Ctrl+1 must decode; a plain '1' must never be swallowed."""
+
+    def _check(self, text):
+        stdscr = _FakeStdscr(text)
+        with mock.patch("curses.ungetch",
+                        side_effect=lambda ch: stdscr.ungetch(ch)):
+            ok = _is_ctrl_1(stdscr)
+        return ok, stdscr._items
+
+    def test_xterm_csi_u_ctrl_1(self):
+        ok, remaining = self._check("[49;5u")
+        self.assertTrue(ok)
+        self.assertEqual(remaining, [])
+
+    def test_kitty_csi_u_ctrl_1(self):
+        ok, remaining = self._check("[49:5u")
+        self.assertTrue(ok)
+        self.assertEqual(remaining, [])
+
+    def test_alternate_modified_1(self):
+        ok, remaining = self._check("[1;5u")
+        self.assertTrue(ok)
+        self.assertEqual(remaining, [])
+
+    def test_plain_one_is_not_ctrl_1_and_is_pushed_back(self):
+        ok, remaining = self._check("1")
+        self.assertFalse(ok)
+        self.assertEqual(remaining, [ord("1")])
+
+    def test_non_matching_csi_is_pushed_back_unchanged(self):
+        ok, remaining = self._check("[11~")
+        self.assertFalse(ok)
+        self.assertEqual(remaining, [ord(c) for c in "[11~"])
+
+    def test_bare_esc_followed_by_nothing(self):
+        ok, remaining = self._check("")
+        self.assertFalse(ok)
+        self.assertEqual(remaining, [])
+
+
+class TestLeaveToDashboard(unittest.TestCase):
+    """The Save/Discard/Cancel gate must keep dirty work safe."""
+
+    def _gate(self, buf, choice=None, save_error=None):
+        stdscr = _FakeStdscr("")
+        with mock.patch(
+            "stdedit.tui._unsaved_changes_prompt", return_value=choice
+        ):
+            if save_error:
+                def boom():
+                    raise OSError(save_error)
+                buf.save = boom
+            return _leave_to_dashboard(
+                stdscr, buf, render_unsaved=lambda t: None)
+
+    def test_clean_buffer_is_allowed_immediately(self):
+        buf = Buffer()
+        self.assertEqual(self._gate(buf), (True, ""))
+
+    def test_clean_buffer_missing_filename_still_allowed(self):
+        buf = Buffer()
+        self.assertEqual(self._gate(buf), (True, ""))
+
+    def test_dirty_save_without_filename_blocked(self):
+        buf = Buffer()
+        buf.modified = True
+        ok, msg = self._gate(buf, choice="save")
+        self.assertFalse(ok)
+        self.assertIn("No filename", msg)
+
+    def test_dirty_save_persists_and_allows(self):
+        tmp = _tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = _pathlib.Path(tmp.name) / "doc.txt"
+        path.write_text("hello\n")
+        buf = Buffer(str(path))
+        buf._lines = ["new", "text"]
+        buf.modified = True
+        ok, msg = self._gate(buf, choice="save")
+        self.assertTrue(ok)
+        self.assertEqual(path.read_text().splitlines(), ["new", "text"])
+
+    def test_dirty_save_error_blocked(self):
+        tmp = _tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = _pathlib.Path(tmp.name) / "doc.txt"
+        path.write_text("hello\n")
+        buf = Buffer(str(path))
+        buf.modified = True
+        ok, msg = self._gate(buf, choice="save", save_error="read-only")
+        self.assertFalse(ok)
+        self.assertIn("read-only", msg)
+
+    def test_dirty_discard_allows_dashboard(self):
+        buf = Buffer()
+        buf.modified = True
+        ok, msg = self._gate(buf, choice="discard")
+        self.assertTrue(ok)
+        self.assertEqual(msg, "")
+
+    def test_dirty_cancel_blocks_dashboard(self):
+        buf = Buffer()
+        buf.modified = True
+        ok, msg = self._gate(buf, choice="cancel")
+        self.assertFalse(ok)
+        self.assertEqual(msg, "Cancelled")
 
 
 if __name__ == "__main__":

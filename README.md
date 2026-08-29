@@ -46,10 +46,10 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 **Themes** — 15 built-in color themes: default, Monokai, Dracula, Solarized Dark, Solarized Light, Nord, One Dark, Tokyo Night, Gruvbox Dark, Catppuccin Mocha, Rose Pine, GitHub Light, Zenburn, Everforest, Ayu
 
 **Panels & Overlays**
-- Welcome Dashboard (opens with no file/project): YUKI front panel — Find File, Open Folder (native dialog), New File, Recent Files (multi-file picker), Restore Session, Settings, Help and Quit
+- Welcome Dashboard (opens with no file/project): YUKI front panel — Find File, Open Folder (native dialog), New File (folder-first), Recent Files (multi-file picker), Extensions (discovery-only listing), Restore Session, Settings, Help and Quit; `Ctrl+1` returns to YUKI from any overlay
 - File Explorer (`Ctrl-E`): tree view, search, create, delete, rename, copy path
 - Source Control (`Ctrl-G`): stage, unstage, commit, push, pull, branch switch, stash
-- Quick Open (`Ctrl-O`): fuzzy file search — background indexing **and** background result matching, home-directory search from the dashboard, recent-files fallback
+- Quick Open (`Ctrl-O`): fuzzy file search — background indexing **and** background result matching, home-directory search from the dashboard, recent-files fallback. Painted as an overlay over the live screen (the real dashboard or the editor) with a `|` caret inside the search input, so there is never a blank page behind the box. Results rank **nearest files first** (shallower paths beat deeper ties), with app-config / hidden dirs (`.config`, `.ssh`, `Library`, `AppData`, …) matched last but still searchable — so `EDA.py` under `~/Projects` beats `~/.config/…/EDA.py`, and config files are never lost
 - Diff Viewer: scrollable unified diff with syntax colors
 - Image Viewer: opens automatically when you open an image file — PNG / BMP / PPM render in-terminal via half-block truecolor (any 256-color terminal); JPEG / GIF / WebP / HEIC / SVG and more stream full-screen through the Kitty / iTerm2 inline-graphics protocol (raw bytes, terminal-native decoding)
 - Settings (`Ctrl-P`): auto-save mode, theme, font family, suggestions (off / auto-suggest / AI inline)
@@ -240,11 +240,37 @@ q / Esc             close diff view
 ### Quick Open (Ctrl-O overlay)
 
 ```
-type to filter      fuzzy search across project files
+type to filter      fuzzy search across project files; a `|` caret sits
+                    inside the search input right after what you've typed
 Up / Down           move selection
 Enter               open selected file
 Esc / Ctrl-O        close quick open
 Backspace           delete last query character
+Ctrl+1              return to the YUKI dashboard
+                    (Esc and empty-query Enter return to the dashboard too
+                    when the search was opened from it)
+```
+
+The overlay is drawn over the live base frame — the YUKI dashboard when
+launched from `F`/`D`, otherwise the editor — and repaints only when the
+query, selection or results actually change (dirty-frame skip), so there is
+no flicker while typing and no full-screen redraw churn.
+
+### Welcome Dashboard overlays
+
+```
+Enter/Space         activate the highlighted tile
+E                   Extensions — lists discovered extensions without loading
+                    them; ↑/↓ select, Esc / Ctrl+1 return to the dashboard
+N                   New File — folder-first: select a directory with Enter,
+                    type the filename, Enter creates and opens the real file
+--------            inside the New File overlay --------
+Enter               enter the selected directory / create the typed file
+Tab                 auto-complete the filename
+Backspace           delete the last char; with an empty name, go up a folder
+Up / Down           move the selection (selection stays on screen)
+Esc                 return to the dashboard
+Ctrl+1              return to YUKI
 ```
 
 ### Settings (Ctrl-P panel)
@@ -257,6 +283,7 @@ Space / Enter       toggle a setting, or expand/collapse a section
 click header        expand / collapse a section
 click setting       select it (Space to toggle)
 q / Esc / Ctrl-P    close settings panel
+Ctrl+1              return to the YUKI dashboard
 ```
 `auto-save`, `theme`, and `font family` are collapsible dropdown sections (all collapsed when opened) — `Space`/`Enter` or a click on a section header expands or collapses it. Only one section stays open: opening or navigating to another closes the current one. Within a section, `Space` on any option activates it and turns the others off.
 
@@ -290,6 +317,7 @@ icons               Nerd Font glyphs (e.g. MesloLGS NF);
 Ctrl-H or F1        open / close this guide
 Up / Down, PgUp/Dn  scroll this guide
 q / Esc / Enter     close this guide
+Ctrl+1              return to the YUKI dashboard
 ```
 
 ## CLI Usage
@@ -301,12 +329,23 @@ stdedit [file] [options]
 Running `stdedit` with no file (and no `--project`) opens the **welcome
 dashboard**: ↑/↓ navigate its options, Enter/Space activates the selected
 one, or press the key shown on each tile (`F` Find File, `O` Open Folder,
-`N` New File, `R` Recent Files, `S` Restore Session, `C` Settings, `H`/F1
-Help, `Q`/Ctrl-Q quit). `R` opens the **Recent Files** picker — a list of
-your most recently opened files (that still exist); ↑/↓ choose, `Enter`
-opens it, `Esc` returns to the dashboard. `S` restores the most recent
-file directly. `O` opens a native system folder dialog via `zenity` (or
-`kdialog`); without one it falls back to browsing your home directory.
+`N` New File, `R` Recent Files, `E` Extensions, `S` Restore Session, `C`
+Settings, `H`/F1 Help, `Q`/Ctrl-Q quit). `R` opens the **Recent Files**
+picker — a list of your most recently opened files (that still exist); ↑/↓
+choose, `Enter` opens it, `Esc` returns to the dashboard. `S` restores the
+most recent file directly. `O` opens a native system folder dialog via
+`zenity` (or `kdialog`); without one it falls back to browsing your home
+directory. `N` opens the folder-first **New File** picker: enter the target
+directory, type a name, and `Enter` creates the file and opens it in the
+editor (`Esc` abandons the overlay). `E` lists **Extensions** discovered on
+your search paths without importing any of them (`Esc` / `Ctrl+1` closes).
+`F` Find File, `D` Open Folder, `R` Recent Files, `C` Settings and
+`H`/F1 Help are all painted **over the live dashboard** — the YUKI screen
+stays behind the box instead of a blank editor page, and searching, typing
+and scrolling repaint only what changed (no screen shutter once the overlay
+settles; the RAM meter works on Linux **and** macOS/BSD). From any dashboard
+overlay — and from Quick Open, Settings and Help — `Ctrl+1` returns to the
+YUKI dashboard.
 
 | Option | Description |
 |--------|-------------|

@@ -8,6 +8,8 @@ from __future__ import annotations
 import curses
 from typing import List, Tuple
 
+from .render import safe_render
+
 # Color pair IDs (must not collide with other modules)
 _PAIR_DIFF_ADD = 20
 _PAIR_DIFF_DEL = 21
@@ -145,8 +147,8 @@ def draw_diff_overlay(
             attr = 0
 
         try:
-            stdscr.addstr(row + 1, 0, display, attr)
-        except curses.error:
+            stdscr.addstr(row + 1, 0, safe_render(display), attr)
+        except (curses.error, ValueError, UnicodeEncodeError):
             pass
 
     # Scroll indicator

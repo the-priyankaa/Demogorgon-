@@ -24,8 +24,23 @@ class TestPerf(unittest.TestCase):
         self.assertIsInstance(rss_bytes(), int)
         self.assertGreater(rss_bytes(), 0)
 
-    def test_rss_bytes_none_when_proc_unavailable(self):
+    def test_rss_bytes_falls_back_when_proc_unavailable(self):
+        # No /proc (e.g. the getrusage fallback path): on POSIX the sampler
+        # still returns a positive RSS; elsewhere it degrades to None.
         with mock.patch("builtins.open", side_effect=OSError("no /proc")):
+            value = rss_bytes()
+        if sys.platform.startswith(("darwin", "freebsd", "openbsd",
+                                    "netbsd", "dragonfly", "linux")):
+            self.assertIsInstance(value, int)
+            self.assertGreater(value, 0)
+        else:
+            self.assertIsNone(value)
+
+    def test_rss_bytes_none_when_proc_and_resource_unavailable(self):
+        # Neither /proc nor the resource module (e.g. Windows): None, never a
+        # crash, and the meter shows "RAM --".
+        with mock.patch("builtins.open", side_effect=OSError("no /proc")), \
+                mock.patch.dict(sys.modules, {"resource": None}):
             self.assertIsNone(rss_bytes())
 
     def test_meter_label_without_sample_shows_dash(self):

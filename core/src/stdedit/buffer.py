@@ -53,6 +53,7 @@ class Buffer:
         self.newline = "\n"
         self.image_format: Optional[str] = None
         self.image_path: Optional[str] = None
+        self.load_error: Optional[str] = None
 
         self.undo_mgr = UndoManager()
         self._last_action: Optional[str] = None
@@ -91,6 +92,29 @@ class Buffer:
         mapped.close()
         self._lines = CompactLines(lines, enc)
         return self._lines
+
+    def _set_inert(self, message: str) -> None:
+        """Leave the buffer non-editable with a single placeholder line.
+
+        Used for files that cannot be safely opened as text (unreadable
+        paths, embedded-NUL binary files).  ``load_error`` records a message
+        the TUI surfaces instead of crashing on a null-character draw.
+        """
+        self.filename = self.filename
+        self.encoding = "latin-1"
+        self.newline = "\n"
+        self._lines = ["  " + message]
+        self._content_chars = len(self._lines[0])
+        self.cursor_x = 0
+        self.cursor_y = 0
+        self.selection_anchor = None
+        self.modified = False
+        self.undo_mgr = UndoManager()
+        self._last_action = None
+        self.large_file_mode = False
+        self.image_format = None
+        self.image_path = None
+        self.load_error = message
 
     # ------------------------------------------------------------------ #
     # File I/O
@@ -143,8 +167,7 @@ class Buffer:
     def load(self, path: str) -> None:
         self.image_format = None
         self.image_path = None
-        file_size = os.path.getsize(path)
-        is_large = bool(self.large_file_threshold and file_size >= self.large_file_threshold)
+        self.load_error = None
 
         fmt = detect_format_path(path)
         if fmt is not None:
@@ -166,22 +189,40 @@ class Buffer:
             self.image_path = path
             return
 
+        try:
+            file_size = os.path.getsize(path)
+            with open(path, "rb") as f:
+                raw = f.read()
+        except FileNotFoundError:
+            raise  # let callers treat a missing file as an empty/new file
+        except (OSError, ValueError) as exc:
+            # Unreadable / directory path must never crash the TUI: degrade
+            # to an inert buffer and surface the message as status.
+            self._set_inert(f"Cannot read file: {exc}")
+            self.filename = path
+            return
+
+        is_large = bool(self.large_file_threshold and file_size >= self.large_file_threshold)
+
         if is_large:
             encoding, bom_len, newline, _ = self._detect_streamed_encoding(path)
             self.encoding = encoding
             self.newline = newline
         else:
-            with open(path, "rb") as f:
-                raw = f.read()
             encoding = "utf-8"
             bom_len = 0
+            # Decode the *whole* buffer with the BOM-aware codec so a UTF-16/32
+            # BOM document decodes correctly even when the byte count is uneven;
+            # the codec itself strips the BOM and starts from the anchor endian.
             if raw.startswith(codecs.BOM_UTF8):
                 encoding = "utf-8-sig"
                 bom_len = len(codecs.BOM_UTF8)
             elif raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
                 encoding = "utf-16"
+                bom_len = 0
             elif raw.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
                 encoding = "utf-32"
+                bom_len = 0
             try:
                 raw[bom_len:].decode(encoding)
             except UnicodeDecodeError:
@@ -190,6 +231,8 @@ class Buffer:
                     encoding = "utf-8"
                     bom_len = 0
                 except UnicodeDecodeError:
+                    # Pure latin-1 text: no NULs here (checked above), so this
+                    # keeps every byte but never crashes the renderer.
                     raw.decode("latin-1")
                     encoding = "latin-1"
                     bom_len = 0
@@ -207,6 +250,15 @@ class Buffer:
         else:
             text = raw[bom_len:].decode(encoding)
             text = text.replace("\r\n", "\n").replace("\r", "\n")
+            if "\x00" in text:
+                # Embedded NUL in the decoded text means a non-image binary
+                # file (latin-1 fallback preserved raw NUL bytes).  Keep the
+                # buffer inert rather than letting control bytes reach the
+                # curses renderer; UTF-16/32 documents decode without NULs.
+                self._set_inert("Binary/non-text file — cannot be opened as text")
+                self.large_file_mode = False
+                self.filename = path
+                return
             self._lines = text.split("\n") or [""]
             self._content_chars = sum(len(line) for line in self._lines)
 

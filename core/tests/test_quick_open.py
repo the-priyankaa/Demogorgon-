@@ -9,6 +9,9 @@ from stdedit.quick_open import (
     fuzzy_search,
     build_file_index,
     QuickOpen,
+    _classify,
+    _iter_file_index,
+    _fuzzy_search_lowered,
 )
 
 
@@ -309,6 +312,130 @@ class TestFolderMode(unittest.TestCase):
         qo.open()
         self.assertEqual(qo.get_display_items(), [])
         qo.close()
+
+
+class TestSearchTiers(unittest.TestCase):
+    """Nearest-first, config-last search ranking."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._root = os.path.join(self._tmp, "root")
+        os.makedirs(self._root)
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_classify_tiers_and_depth(self):
+        self.assertEqual(_classify(self._root, os.path.join(self._root, "EDA.py")), (0, 0))
+        self.assertEqual(
+            _classify(self._root, os.path.join(self._root, "proj", "a.py")), (0, 1))
+        self.assertEqual(
+            _classify(self._root, os.path.join(self._root, ".config", "a.py")), (1, 1))
+        self.assertEqual(
+            _classify(self._root, os.path.join(self._root, "Library", "a.py")), (1, 1))
+        self.assertEqual(
+            _classify(self._root, os.path.join(self._root, "proj", "sub", "a.py")), (0, 2))
+
+    def test_scan_orders_primary_before_secondary(self):
+        os.makedirs(os.path.join(self._root, "proj"))
+        os.makedirs(os.path.join(self._root, ".config"))
+        os.makedirs(os.path.join(self._root, "Library"))
+        tiers = [
+            _classify(self._root, p)[0]
+            for p in _iter_file_index(self._root)
+        ]
+        self.assertEqual(tiers, sorted(tiers), "tier list must be all 0s then all 1s")
+
+    def test_config_match_ranks_below_folder_match(self):
+        os.makedirs(os.path.join(self._root, "proj"))
+        os.makedirs(os.path.join(self._root, ".config"))
+        visible = os.path.join(self._root, "proj", "EDA.py")
+        config = os.path.join(self._root, ".config", "EDA.py")
+        with open(visible, "w") as f:
+            f.write("x")
+        with open(config, "w") as f:
+            f.write("x")
+
+        qo = QuickOpen(self._root)
+        qo.open()
+        self.addCleanup(qo.close)
+        qo.update_query("EDA")
+        deadline = __import__("time").time() + 3.0
+        while __import__("time").time() < deadline and len(qo.results) < 2:
+            __import__("time").sleep(0.01)
+        self.assertEqual(len(qo.results), 2)
+        first = qo.results[0][1]
+        self.assertIn("proj", first)
+        self.assertTrue(
+            any(p == config for _, p in qo.results),
+            "config match must still appear (ranked below folder hits)")
+
+    def test_only_config_match_shows_config(self):
+        os.makedirs(os.path.join(self._root, ".config"))
+        config = os.path.join(self._root, ".config", "EDA.py")
+        with open(config, "w") as f:
+            f.write("x")
+        qo = QuickOpen(self._root)
+        qo.open()
+        self.addCleanup(qo.close)
+        qo.update_query("EDA")
+        deadline = __import__("time").time() + 3.0
+        while __import__("time").time() < deadline and not qo.results:
+            __import__("time").sleep(0.01)
+        self.assertTrue(qo.results)
+        self.assertEqual(qo.results[0][1], config)
+
+    def test_nearest_file_outranks_deeper_match(self):
+        # Same basename at both depths so scoring differs only by depth.
+        # Path segments deliberately contain none of the query letters
+        # (e/d/a) so the fuzzy subsequence cannot false-start in a prefix —
+        # a filesystem-backed version of this is flaky because mkdtemp names
+        # like "tmp_ews1xc5" leak an early 'e' into the matched string.
+        files = [
+            "/x/aaaaaaa/eda.py",
+            "/x/ccccc/gggg/hhhh/eda.py",
+        ]
+        lowers = [f.lower() for f in files]
+        tiers = [0, 0]
+        depths = [1, 3]
+        res = _fuzzy_search_lowered("eda", files, lowers,
+                                    tiers=tiers, depths=depths)
+        self.assertEqual(
+            [p for _, p in res],
+            ["/x/aaaaaaa/eda.py", "/x/ccccc/gggg/hhhh/eda.py"])
+
+    def test_tier_alignment_with_non_matching_prefixes(self):
+        # A non-matching file preceding the matches must not shift later
+        # files onto the wrong tier: the config match stays below the folder
+        # match even though indexing order skips the non-matching file.
+        files = [
+            "/home/u/z_qlxwkn.py",
+            "/home/u/.config/zmat_cfg.py",
+            "/home/u/deep/deep/zmat_vis.py",
+        ]
+        lowers = [f.lower() for f in files]
+        tiers = [0, 1, 0]
+        depths = [0, 1, 2]
+        res = _fuzzy_search_lowered("mat", files, lowers,
+                                    tiers=tiers, depths=depths)
+        self.assertEqual(
+            [p for _, p in res],
+            ["/home/u/deep/deep/zmat_vis.py", "/home/u/.config/zmat_cfg.py"])
+
+    def test_prune_names_never_indexed(self):
+        for name in (".cache", "Caches", ".Trash", "Trash", ".thumbnails"):
+            os.makedirs(os.path.join(self._root, name), exist_ok=True)
+            with open(os.path.join(self._root, name, "junk.py"), "w") as f:
+                f.write("x")
+        keep_dir = os.path.join(self._root, "keep")
+        os.makedirs(keep_dir)
+        with open(os.path.join(keep_dir, "real.py"), "w") as f:
+            f.write("x")
+
+        files = list(_iter_file_index(self._root))
+        self.assertEqual(files, [os.path.join(keep_dir, "real.py")])
+        indexed = build_file_index(self._root)
+        self.assertEqual(indexed, [os.path.join(keep_dir, "real.py")])
 
 
 if __name__ == "__main__":

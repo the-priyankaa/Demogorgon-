@@ -19,10 +19,12 @@ class DashboardLayoutTests(unittest.TestCase):
                 self.assertLessEqual(rect.y + rect.h, max(height, 8), name)
 
     def test_action_mapping(self):
-        self.assertEqual(action_count(), 9)
+        self.assertEqual(action_count(), 10)
         self.assertEqual(action_key(0), "F")
         self.assertEqual(action_key(1), "D")
-        self.assertEqual(action_key(8), "Q")
+        self.assertEqual(action_key(3), "N")
+        self.assertEqual(action_key(5), "E")
+        self.assertEqual(action_key(9), "Q")
 
     def test_action_keys_unique(self):
         from stdedit.dashboard import ACTIONS
@@ -30,7 +32,7 @@ class DashboardLayoutTests(unittest.TestCase):
         self.assertEqual(len(keys), len(set(keys)))
         self.assertEqual(
             set(keys),
-            {"F", "D", "O", "N", "R", "S", "C", "H", "Q"})
+            {"F", "D", "O", "N", "R", "E", "S", "C", "H", "Q"})
 
 
 class DashboardDrawTests(unittest.TestCase):
