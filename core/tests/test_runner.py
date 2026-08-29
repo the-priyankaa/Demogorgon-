@@ -3,6 +3,7 @@ import re
 import unittest
 
 from stdedit import runner
+from stdedit import icons
 
 
 def make_which(available):
@@ -273,6 +274,111 @@ class RunCurrentFileTests(unittest.TestCase):
         self.assertIn("Could not save before running", status)
         self.assertIn("disk full", status)
         self.assertEqual([], self.runs)
+
+
+class DecorationTests(unittest.TestCase):
+    """The spawned terminal is framed by a boxed banner + colored footer."""
+
+    def setUp(self):
+        CAPTURE.clear()
+
+    def test_frame_geometry_all_lines_exact_width(self):
+        lines = runner._frame_lines(
+            "/tmp/a.py", "Python 3", "", "python3 /tmp/a.py", width=70)
+        for line in lines:
+            self.assertEqual(70, len(line), repr(line))
+        self.assertTrue(lines[0].startswith("┌"))
+        self.assertTrue(lines[-1].startswith("├"))
+
+    def test_frame_header_labels_file_and_command(self):
+        lines = runner._frame_lines(
+            "/tmp/run/sample.py", "Python 3", "", "python3 /tmp/run/sample.py",
+            width=70)
+        self.assertIn("▶", lines[1])
+        self.assertIn("Python 3", lines[1])
+        self.assertIn("sample.py", lines[1])
+        self.assertIn("file: /tmp/run/sample.py", lines[2])
+        self.assertIn("cmd: python3 /tmp/run/sample.py", lines[3])
+
+    def test_frame_keeps_geometry_with_icon(self):
+        lines = runner._frame_lines(
+            "/tmp/a.py", "Python 3", "🐍", "python3 /tmp/a.py", width=70)
+        self.assertIn("🐍", lines[1])
+
+    def test_long_path_is_truncated_and_still_fits(self):
+        long = "/tmp/" + "y" * 200 + "/sample.py"
+        lines = runner._frame_lines(
+            long, "Python 3", "", f"python3 {long}", width=70)
+        for line in lines:
+            self.assertLessEqual(len(line), 70, repr(line))
+        self.assertIn("…", "".join(lines[1:4]))
+
+    def test_title_osc_carries_basename_and_runtime(self):
+        s = runner._build_script(
+            "/tmp/my.py", "python3 /tmp/my.py", runtime="python3", icon="")
+        self.assertIn("\\033]0;%s\\007", s)
+        self.assertIn("stdedit — run my.py (Python 3)", s)
+        self.assertTrue(s.startswith("printf "), s)
+
+    def test_tricky_filenames_are_escaped_in_emitted_lines(self):
+        s = runner._build_script(
+            "/tmp/odd 'name' (x).py", "python3 /tmp/odd 'name' (x).py",
+            runtime="python3", icon="")
+        self.assertIn("'\\''", s)
+        self.assertNotIn("syntax error", s)
+
+    def test_colors_active_by_default(self):
+        s = runner._build_script(
+            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="")
+        self.assertIn("\\x1b[32m", s)
+        self.assertIn("\\x1b[31m", s)
+        self.assertIn("\\x1b[0m", s)
+
+    def test_no_color_keeps_frame_drops_sgr(self):
+        s = runner._build_script(
+            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="",
+            colors=False)
+        self.assertIn("┌", s)
+        self.assertIn("stdedit — run", s)
+        self.assertNotIn("\\x1b[", s)
+
+    def test_raw_script_matches_plain_template(self):
+        s = runner._build_script(
+            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="",
+            raw=True)
+        for forbidden in ("┌", "▶", "\\033]0;", "\\x1b["):
+            self.assertNotIn(forbidden, s)
+        self.assertIn('cd "$(dirname --', s)
+        self.assertIn('echo "[stdedit] finished (exit $rc) — press Enter to close"', s)
+        self.assertIn("read -r _", s)
+
+    def test_run_file_respects_raw_env(self):
+        ok, _status = runner.run_file(
+            "proj/a.py", _which=make_which({"python3", "kitty"}),
+            _popen=fake_popen, env={"STDEDIT_RUN_RAW": "1"})
+        self.assertTrue(ok)
+        script = CAPTURE[0][0][-1]
+        self.assertNotIn("┌", script)
+        self.assertNotIn("▶", script)
+
+    def test_run_file_respects_no_color_env(self):
+        ok, _status = runner.run_file(
+            "proj/a.py", _which=make_which({"python3", "kitty"}),
+            _popen=fake_popen, env={"NO_COLOR": "1"})
+        self.assertTrue(ok)
+        script = CAPTURE[0][0][-1]
+        self.assertNotIn("\\x1b[", script)
+        self.assertIn("┌", script)
+
+    def test_run_file_omits_icon_when_disabled(self):
+        glyph = icons.icon_for_file("proj/a.py", True)
+        self.assertTrue(glyph)
+        ok, _status = runner.run_file(
+            "proj/a.py", _which=make_which({"python3", "kitty"}),
+            _popen=fake_popen, env={"STDEDIT_ICONS": "0"})
+        self.assertTrue(ok)
+        script = CAPTURE[0][0][-1]
+        self.assertNotIn(glyph, script)
 
 
 if __name__ == "__main__":
