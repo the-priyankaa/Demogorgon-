@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr
+from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest import mock
 
@@ -166,6 +167,19 @@ class TestMainExitCodes(unittest.TestCase):
             buf = run.call_args.args[0]
             self.assertEqual(buf.filename, path)
             self.assertEqual(buf.lines[0], "hello world")
+
+    def test_launch_prints_yuki_banner(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "doc.txt")
+            with open(path, "w") as f:
+                f.write("hello\n")
+            with _fake_tty(), self._env("xterm-256color"), \
+                 mock.patch.object(app.tui, "run") as run, \
+                 redirect_stdout(io.StringIO()) as out:
+                rc = app.main([path])
+            self.assertEqual(rc, 0)
+            run.assert_called_once()
+            self.assertIn("YUKI", out.getvalue())
 
     def test_directory_positional_becomes_project(self):
         with tempfile.TemporaryDirectory() as d:

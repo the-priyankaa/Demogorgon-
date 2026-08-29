@@ -4,6 +4,8 @@ import unittest
 
 from stdedit.tui import (
     _get_key,
+    _autosave_step,
+    _auto_save_on_edit,
     build_help_lines,
     is_help_toggle,
     line_number_width,
@@ -1382,6 +1384,140 @@ class TestStartupTree(unittest.TestCase):
         explorer = FileExplorer(str(self.project))
         _startup_tree(explorer, None)
         self.assertEqual(explorer.selected_idx, 0)
+
+
+class TestAutoSaveStep(unittest.TestCase):
+    def _file_buf(self, text="hello\n"):
+        tmp = _tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = _pathlib.Path(tmp.name) / "doc.txt"
+        path.write_text(text)
+        buf = Buffer(str(path))
+        return buf
+
+    def test_idle_mode_saves_after_delay(self):
+        buf = self._file_buf()
+        buf.insert_char("x")
+        saved, err = _autosave_step(
+            buf, True, False, last_edit_time=0.0, last_save_time=0.0, now=6.0)
+        self.assertTrue(saved)
+        self.assertIsNone(err)
+        self.assertFalse(buf.modified)
+
+    def test_idle_mode_skips_before_delay(self):
+        buf = self._file_buf()
+        buf.insert_char("x")
+        saved, err = _autosave_step(
+            buf, True, False, last_edit_time=0.0, last_save_time=0.0, now=3.0)
+        self.assertFalse(saved)
+        self.assertIsNone(err)
+        self.assertTrue(buf.modified)
+
+    def test_idle_mode_skips_when_buffer_unmodified(self):
+        buf = self._file_buf()
+        saved, err = _autosave_step(
+            buf, True, False, last_edit_time=0.0, last_save_time=0.0, now=60.0)
+        self.assertFalse(saved)
+        self.assertIsNone(err)
+
+    def test_periodic_mode_saves_after_interval(self):
+        buf = self._file_buf()
+        buf.insert_char("x")
+        saved, err = _autosave_step(
+            buf, False, True, last_edit_time=0.0, last_save_time=0.0, now=31.0)
+        self.assertTrue(saved)
+        self.assertIsNone(err)
+        self.assertFalse(buf.modified)
+
+    def test_periodic_mode_skips_before_interval(self):
+        buf = self._file_buf()
+        buf.insert_char("x")
+        saved, err = _autosave_step(
+            buf, False, True, last_edit_time=0.0, last_save_time=0.0, now=10.0)
+        self.assertFalse(saved)
+        self.assertIsNone(err)
+
+    def test_idle_takes_precedence_when_both_are_due(self):
+        buf = self._file_buf()
+        buf.insert_char("x")
+        saved, err = _autosave_step(
+            buf, True, True, last_edit_time=0.0, last_save_time=0.0, now=60.0)
+        self.assertTrue(saved)
+        self.assertIsNone(err)
+
+    def test_no_filename_never_saves(self):
+        buf = Buffer()
+        buf.insert_char("x")
+        buf.modified = True
+        saved, err = _autosave_step(
+            buf, True, True, last_edit_time=0.0, last_save_time=0.0, now=60.0)
+        self.assertFalse(saved)
+        self.assertIsNone(err)
+
+    def test_oserror_is_reported_not_raised(self):
+        buf = self._file_buf()
+        buf.modified = True
+
+        def boom():
+            raise OSError("disk full")
+
+        buf.save = boom
+        saved, err = _autosave_step(
+            buf, True, True, last_edit_time=0.0, last_save_time=0.0, now=60.0)
+        self.assertFalse(saved)
+        self.assertIn("disk full", err)
+
+    def test_valueerror_is_reported_not_raised(self):
+        buf = self._file_buf()
+        buf.modified = True
+
+        def boom():
+            raise ValueError("No filename to save to")
+
+        buf.save = boom
+        saved, err = _autosave_step(
+            buf, True, True, last_edit_time=0.0, last_save_time=0.0, now=60.0)
+        self.assertFalse(saved)
+        self.assertIn("No filename", err)
+
+
+class TestAutoSaveOnEdit(unittest.TestCase):
+    def test_saves_immediately_when_filename_set(self):
+        tmp = _tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = _pathlib.Path(tmp.name) / "doc.txt"
+        path.write_text("hello\n")
+        buf = Buffer(str(path))
+        buf.lines = ["edited line"]
+        buf.modified = True
+        saved, err = _auto_save_on_edit(buf)
+        self.assertTrue(saved)
+        self.assertIsNone(err)
+        self.assertFalse(buf.modified)
+        self.assertEqual(path.read_text(), "edited line")
+
+    def test_no_filename_returns_idle(self):
+        buf = Buffer()
+        buf.modified = True
+        saved, err = _auto_save_on_edit(buf)
+        self.assertFalse(saved)
+        self.assertIsNone(err)
+
+    def test_save_error_is_reported_not_raised(self):
+        tmp = _tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = _pathlib.Path(tmp.name) / "doc.txt"
+        path.write_text("hello\n")
+        buf = Buffer(str(path))
+
+        def boom():
+            raise OSError("read-only")
+
+        buf.save = boom
+        buf.modified = True
+        saved, err = _auto_save_on_edit(buf)
+        self.assertFalse(saved)
+        self.assertIn("read-only", err)
 
 
 if __name__ == "__main__":

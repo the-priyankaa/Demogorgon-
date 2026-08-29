@@ -167,6 +167,10 @@ def main(argv=None) -> int:
         extension_names = args.extension
         extension_files = args.extension_file
 
+    # Brand line before curses takes over. It flashes away on the first
+    # repaint but stays in the terminal scrollback.
+    print("YUKI v0.1.0 — zero-dependency terminal editor", flush=True)
+
     tui.run(
         buf,
         extension_names=extension_names,

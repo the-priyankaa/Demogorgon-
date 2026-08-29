@@ -71,6 +71,49 @@ _COLOR_PAIRS = {
 
 _PASTE_END = "\x1b[201~"
 
+_AUTO_SAVE_POLL_MS = 250
+_AUTO_SAVE_IDLE_DELAY = 5.0
+_AUTO_SAVE_PERIODIC_DELAY = 30.0
+
+
+def _autosave_step(buf, idle_active: bool, periodic_active: bool,
+                   last_edit_time: float, last_save_time: float,
+                   now: float) -> tuple[bool, str | None]:
+    """Perform at most one auto-save according to the active mode.
+
+    Returns ``(saved, error_message)``.  ``error_message`` is set (and
+    ``saved`` is False) when the write fails; the caller shows it in the
+    status bar instead of letting the exception escape the main loop.
+    """
+    if not (buf.modified and buf.filename):
+        return False, None
+    try:
+        if idle_active and now - last_edit_time >= _AUTO_SAVE_IDLE_DELAY:
+            buf.save()
+            return True, None
+        if (periodic_active
+                and now - last_save_time >= _AUTO_SAVE_PERIODIC_DELAY):
+            buf.save()
+            return True, None
+    except (ValueError, OSError) as exc:
+        return False, str(exc)
+    return False, None
+
+
+def _auto_save_on_edit(buf) -> tuple[bool, str | None]:
+    """Save immediately for the "on every edit" mode.
+
+    Returns ``(saved, error_message)`` like :func:`_autosave_step`.  The
+    caller gates this on the ``auto_save_on_edit`` setting.
+    """
+    if not buf.filename:
+        return False, None
+    try:
+        buf.save()
+        return True, None
+    except (ValueError, OSError) as exc:
+        return False, str(exc)
+
 
 def _apply_font_family() -> None:
     """Send OSC 50 escape to switch terminal font to the active font family."""
@@ -494,7 +537,6 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     expanded_sections: dict[str, bool] = {}
     _last_edit_time = time.time()
     _last_save_time = time.time()
-    _auto_save_flag = False
     if tree_on_start:
         explorer.visible = True
         explorer.active = True
@@ -813,12 +855,30 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         meter.frame_end(frame_started)
         status = ""
 
+        # Check auto-save timers every frame (including idle polls), so the
+        # idle/periodic modes fire even when the user isn't typing. Must run
+        # before `_prev_modified` is captured so the next edit correctly
+        # restarts the idle clock after a save.
+        now = time.time()
+        saved, save_error = _autosave_step(
+            buf, settings.get("auto_save_idle"), settings.get("auto_save_periodic"),
+            _last_edit_time, _last_save_time, now)
+        if saved:
+            _last_save_time = now
+            status = "Auto-saved"
+        elif save_error is not None:
+            status = f"Auto-save failed: {save_error}"
+
         _prev_modified = buf.modified
         _editor_idle = not (explorer.active or show_settings or show_help
                             or quick_open.visible or recent_picker.active
                             or image_view_active)
         if settings.get("codeium_on"):
             stdscr.timeout(350 if _editor_idle else 50)
+        elif settings.get("auto_save_idle") or settings.get("auto_save_periodic"):
+            # Wake up regularly so the idle/periodic timers above get a
+            # chance to fire while the user is idle.
+            stdscr.timeout(_AUTO_SAVE_POLL_MS)
         key = _get_key(stdscr)
         if key is None:
             # Inline-suggestion debounce: fetch when idle for >= 0.35s.
@@ -829,29 +889,6 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 threading.Thread(
                     target=_ghost_run, args=(), daemon=True).start()
             continue
-
-        # Check auto-save conditions on every key event.
-        now = time.time()
-        if buf.modified and buf.filename:
-            saved = False
-            save_error = None
-            if settings.get("auto_save_idle") and now - _last_edit_time >= 5:
-                try:
-                    buf.save()
-                    saved = True
-                except (ValueError, OSError) as exc:
-                    save_error = exc
-            elif settings.get("auto_save_periodic") and now - _last_save_time >= 30:
-                try:
-                    buf.save()
-                    saved = True
-                except (ValueError, OSError) as exc:
-                    save_error = exc
-            if saved:
-                _last_save_time = now
-                status = "Auto-saved"
-            elif save_error is not None:
-                status = f"Auto-save failed: {save_error}"
 
         # --- Mouse events (before all other key handling) ---
         if isinstance(key, tuple) and key[0] == "__mouse__":
@@ -1481,6 +1518,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         elif key == "\x13":  # Ctrl-S
             try:
                 buf.save()
+                _last_save_time = time.time()
                 status = f"Saved {buf.filename}"
             except ValueError:
                 status = "No filename — run with a file argument to enable saving"
@@ -1553,10 +1591,13 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
         # Track last edit time for idle auto-save.
         if buf.modified and not _prev_modified:
             _last_edit_time = time.time()
-            if settings.get("auto_save_on_edit") and buf.filename:
-                buf.save()
-                _last_save_time = time.time()
-                status = "Auto-saved"
+            if settings.get("auto_save_on_edit"):
+                saved, save_error = _auto_save_on_edit(buf)
+                if saved:
+                    _last_save_time = time.time()
+                    status = "Auto-saved"
+                elif save_error is not None:
+                    status = f"Auto-save failed: {save_error}"
 
         # Keep the suggest popup & inline ghost in sync with the buffer.
         if not isinstance(key, tuple):

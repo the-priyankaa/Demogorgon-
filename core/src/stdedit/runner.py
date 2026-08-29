@@ -8,7 +8,7 @@ shlex, tempfile); the runtimes and the terminal are optional binaries that
 must already be on the system.
 
 The spawned terminal is decorated: the window title is set to
-``stdedit — run <file>``, the program output is indented two cells so it
+``YUKI — run <file>``, the program output is indented two cells so it
 aligns inside a boxed banner naming the interpreter, file, and command, and
 the run ends on a full-width bottom bar showing the exit code plus further
 actions (``r`` rerun, ``Enter`` close).  Decoration can be tuned
@@ -278,7 +278,7 @@ def _bash_squote(text: str) -> str:
 def _frame_lines(path: str, runtime_label: str, icon: str,
                  command: str, width: int) -> List[str]:
     base = os.path.basename(path) or path
-    head = f"▶ {runtime_label}  {icon} {base}" if icon else f"▶ {runtime_label}  {base}"
+    head = f"▶ YUKI — {runtime_label}  {icon} {base}" if icon else f"▶ YUKI — {runtime_label}  {base}"
     return [
         "┌" + "─" * (width - 2) + "┐",
         *_pad_line(head, width),
@@ -367,14 +367,14 @@ def _build_script(path: str, command: str, runtime: str = "", icon: str = "",
         "rc=$?\n"
         f"trap 'rm -f {out} 2>/dev/null' EXIT\n"
         "echo\n"
-        'echo "[stdedit] finished (exit $rc) — press Enter to close"\n'
+        'echo "[YUKI] finished (exit $rc) — press Enter to close"\n'
         "read -r _\n"
     )
     if raw:
         return plain
     label = _runtime_label(runtime)
     base = _sanitize(os.path.basename(path) or path)
-    title_text = f"stdedit — run {base}"
+    title_text = f"YUKI — run {base}"
     if runtime:
         title_text += f" ({label})"
     title = ("printf '\\033]0;%s\\007' '"

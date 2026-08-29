@@ -300,6 +300,7 @@ class DecorationTests(unittest.TestCase):
             "/tmp/run/sample.py", "Python 3", "", "python3 /tmp/run/sample.py",
             width=70)
         self.assertIn("▶", lines[1])
+        self.assertIn("YUKI", lines[1])
         self.assertIn("Python 3", lines[1])
         self.assertIn("sample.py", lines[1])
         self.assertIn("file: /tmp/run/sample.py", lines[2])
@@ -324,7 +325,7 @@ class DecorationTests(unittest.TestCase):
         s = runner._build_script(
             "/tmp/my.py", "python3 /tmp/my.py", runtime="python3", icon="")
         self.assertIn("\\033]0;%s\\007", s)
-        self.assertIn("stdedit — run my.py (Python 3)", s)
+        self.assertIn("YUKI — run my.py (Python 3)", s)
         self.assertTrue(s.startswith("printf "), s)
 
     def test_tricky_filenames_are_escaped_in_emitted_lines(self):
@@ -346,7 +347,7 @@ class DecorationTests(unittest.TestCase):
             "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="",
             colors=False)
         self.assertIn("┌", s)
-        self.assertIn("stdedit — run", s)
+        self.assertIn("YUKI — run", s)
         self.assertNotIn("\\x1b[", s)
 
     def test_raw_script_matches_plain_template(self):
@@ -356,7 +357,7 @@ class DecorationTests(unittest.TestCase):
         for forbidden in ("┌", "▶", "\\033]0;", "\\x1b["):
             self.assertNotIn(forbidden, s)
         self.assertIn('cd "$(dirname --', s)
-        self.assertIn('echo "[stdedit] finished (exit $rc) — press Enter to close"', s)
+        self.assertIn('echo "[YUKI] finished (exit $rc) — press Enter to close"', s)
         self.assertIn("read -r _", s)
 
     def test_run_file_respects_raw_env(self):
