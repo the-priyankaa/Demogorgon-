@@ -308,9 +308,9 @@ def _image_viewer_frame(stdscr, buf: Buffer, st: dict) -> Optional[str]:
     return None
 
 
-def run(buf: Buffer, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
+def run(buf: Buffer, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None, tree_on_start: bool = False) -> None:
     """Entry point. Wraps curses so the terminal is restored on crash/exit."""
-    curses.wrapper(_curses_main, buf, extension_names or [], extension_files or [], load_all_extensions, project_dir)
+    curses.wrapper(_curses_main, buf, extension_names or [], extension_files or [], load_all_extensions, project_dir, tree_on_start)
 
 
 def _init_colors() -> None:
@@ -427,7 +427,7 @@ _click_count: int = 0
 _CLICK_THRESHOLD: float = 0.4
 
 
-def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None) -> None:
+def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None, load_all_extensions: bool = False, project_dir=None, tree_on_start: bool = False) -> None:
     """
     TEMPORARY minimal UI — just enough to test buffer.py interactively.
     Person A will replace this with the real thing (line numbers, status
@@ -481,13 +481,13 @@ def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None
             status = (status + "  " if status else "") + f"{len(extension_errors)} extension error(s)"
         hint = "File tree active — Enter opens file/folder, Esc to focus editor, Ctrl-H help"
         status = (status + "   " if status else "") + hint
-        _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer, icons_on, root_dir, git_panel, diff_viewer, project_dir)
+        _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer, icons_on, root_dir, git_panel, diff_viewer, project_dir, tree_on_start)
     finally:
         extensions.shutdown()
         _disable_bracketed_paste()
 
 
-def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext, explorer: FileExplorer, icons_on: bool = False, root_dir: str = ".", git_panel: GitPanel | None = None, diff_viewer: DiffViewer | None = None, project_dir: str | None = None) -> None:
+def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool, meter: PerfMeter, extensions: ExtensionAPI, editor: EditorContext, explorer: FileExplorer, icons_on: bool = False, root_dir: str = ".", git_panel: GitPanel | None = None, diff_viewer: DiffViewer | None = None, project_dir: str | None = None, tree_on_start: bool = False) -> None:
     show_help = False
     show_settings = False
     settings_idx = 0
@@ -495,6 +495,10 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     _last_edit_time = time.time()
     _last_save_time = time.time()
     _auto_save_flag = False
+    if tree_on_start:
+        explorer.visible = True
+        explorer.active = True
+        _startup_tree(explorer, buf.filename)
     _git_branch = None
     _git_counts: dict[str, int] = {"modified": 0, "added": 0, "deleted": 0, "untracked": 0}
     _git_refresh_time = 0.0
@@ -1592,6 +1596,12 @@ def resolve_tree_root(filename, project_dir) -> str:
     return "."
 
 
+def _startup_tree(explorer: FileExplorer, filename) -> None:
+    """Select *filename* in the tree so it is revealed on startup."""
+    if filename and os.path.isfile(filename):
+        explorer.reveal(filename)
+
+
 def _draw_status_prompt(stdscr, text: str) -> None:
     """Render prompt text on the status row (used by interactive prompts)."""
     height, width = stdscr.getmaxyx()
@@ -1793,7 +1803,7 @@ HELP_SECTIONS = [
         "Ctrl-S              save current file",
         "Ctrl-P              settings / preferences",
         "Ctrl-O              quick open — fuzzy file search",
-        "F5  /  Ctrl-Enter   run current file in a terminal (r rerun, e edit, Enter close)",
+        "F5  /  Ctrl-Enter   run current file in a terminal (r rerun, Enter close)",
         "Ctrl-Q              quit (opens a confirmation dialog)",
     ]),
     ("FILE TREE (Ctrl-E panel)", [

@@ -170,7 +170,7 @@ class RunFileTests(unittest.TestCase):
         self.assertIn("python3", script)
         self.assertIn("[Enter] close", script)
         self.assertIn("[r] rerun", script)
-        self.assertIn("[e] edit", script)
+        self.assertNotIn("[e] edit", script)
         self.assertIn("exit: $rc", script)
         self.assertIn("read -n 1 -s -r", script)
         self.assertIn("PIPESTATUS[0]", script)
@@ -397,10 +397,11 @@ class DecorationTests(unittest.TestCase):
     def test_built_script_bottom_bar_and_keys(self):
         s = runner._build_script(
             "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="")
-        self.assertIn('bar=" exit: $rc  │  [r] rerun  [e] edit  [Enter] close "', s)
+        self.assertIn('bar=" exit: $rc  │  [r] rerun  [Enter] close "', s)
         self.assertIn("r|R) continue", s)
-        self.assertIn('e|E) if command -v stdedit', s)
-        self.assertIn("stdedit /tmp/a.py", s)
+        self.assertNotIn("e|E)", s)
+        self.assertNotIn("command -v stdedit", s)
+        self.assertNotIn("[e] edit", s)
         self.assertIn("read -n 1 -s -r k", s)
         self.assertIn("run_once", s)
 
@@ -410,6 +411,7 @@ class DecorationTests(unittest.TestCase):
             colors=False)
         self.assertIn(" exit: $rc ", s)
         self.assertIn("[r] rerun", s)
+        self.assertIn("[Enter] close", s)
         self.assertNotIn("\\x1b[7m", s)
 
     def test_compile_script_wraps_cmd_line_without_cutting_path(self):

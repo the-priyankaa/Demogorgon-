@@ -25,6 +25,21 @@ class TestProjectFlag(unittest.TestCase):
         self.assertEqual(args.project, "~/myapp")
 
 
+class TestTreeFlag(unittest.TestCase):
+    def test_tree_defaults_to_false(self):
+        args = build_parser().parse_args(["a.py"])
+        self.assertFalse(args.tree)
+
+    def test_tree_flag_parsed(self):
+        args = build_parser().parse_args(["--tree", "a.py"])
+        self.assertTrue(args.tree)
+
+    def test_tree_flag_without_file(self):
+        args = build_parser().parse_args(["--tree"])
+        self.assertTrue(args.tree)
+        self.assertIsNone(args.file)
+
+
 class TestResolveOpenTargets(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

@@ -1349,5 +1349,40 @@ class TestForgetImagePixels(unittest.TestCase):
         self.assertEqual(st["path"], "/tmp/img.png")
 
 
+class TestStartupTree(unittest.TestCase):
+    def setUp(self):
+        self.tmp = _tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.project = _pathlib.Path(self.tmp.name)
+        (self.project / "sub").mkdir()
+        self.leaf = self.project / "sub" / "leaf.py"
+        self.leaf.write_text("x=1\n")
+
+    def test_reveals_existing_file(self):
+        from stdedit.tui import _startup_tree
+        from stdedit.explorer import FileExplorer
+        explorer = FileExplorer(str(self.project))
+        _startup_tree(explorer, str(self.leaf))
+        self.assertTrue(explorer.visible)
+        self.assertTrue(explorer.active)
+        selected = explorer.get_selected()
+        self.assertEqual(selected[2], str(self.leaf))
+
+    def test_ignores_missing_file(self):
+        from stdedit.tui import _startup_tree
+        from stdedit.explorer import FileExplorer
+        explorer = FileExplorer(str(self.project))
+        _startup_tree(explorer, str(self.project / "nope.py"))
+        self.assertEqual(explorer.selected_idx, 0)
+        self.assertNotEqual(explorer.get_selected()[2], str(self.project / "nope.py"))
+
+    def test_no_filename_is_safe(self):
+        from stdedit.tui import _startup_tree
+        from stdedit.explorer import FileExplorer
+        explorer = FileExplorer(str(self.project))
+        _startup_tree(explorer, None)
+        self.assertEqual(explorer.selected_idx, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

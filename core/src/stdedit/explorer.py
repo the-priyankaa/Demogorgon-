@@ -180,6 +180,29 @@ class FileExplorer:
         if source:
             self.selected_idx = max(0, min(len(source) - 1, self.selected_idx + dy))
 
+    def reveal(self, path: str) -> None:
+        """Expand the tree and select *path* so it is visible and highlighted.
+
+        Ancestors up to ``root_dir`` are expanded first (the tree only lists
+        items whose parent folders are expanded), then the exact row for
+        *path* is selected.  Safe when *path* is missing or outside the tree:
+        the tree is just left refreshed on its current selection.
+        """
+        path = os.path.abspath(path)
+        if not os.path.exists(path):
+            return
+        if self.searching:
+            self.exit_search()
+        parent = os.path.dirname(path)
+        while parent and parent != self.root_dir and parent.startswith(self.root_dir):
+            self.expanded_dirs.add(parent)
+            parent = os.path.dirname(parent)
+        self.refresh()
+        for i, item in enumerate(self.items):
+            if item[2] == path:
+                self.selected_idx = i
+                break
+
     # ------------------------------------------------------------------ #
     # Creation
     # ------------------------------------------------------------------ #

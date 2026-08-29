@@ -31,6 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Folder the file tree is rooted at (default: opened file's parent or cwd)",
     )
     parser.add_argument(
+        "--tree",
+        action="store_true",
+        help="Open with the file explorer tree visible and focused on the opened file",
+    )
+    parser.add_argument(
         "--tab-size", type=int, default=4, help="Tab width in spaces (default: 4)"
     )
     parser.add_argument(
@@ -168,6 +173,7 @@ def main(argv=None) -> int:
         extension_files=extension_files,
         load_all_extensions=args.all_extensions,
         project_dir=project_dir,
+        tree_on_start=args.tree,
     )
     return 0
 

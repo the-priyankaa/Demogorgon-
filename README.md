@@ -88,7 +88,7 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 - Output (stdout + stderr) is indented to align inside the boxed frame, with
   long `cmd:`/`file:` lines wrapped to indented continuation rows
 - A full-width bottom bar shows the exit code (green `✔` / red `✖`) and what
-  to do next: `r` rerun, `e` edit in stdedit (then rerun), `Enter` close
+  to do next: `r` rerun, `Enter` close
 - Interactive/curses programs (htop, vim) don't render under the output pipe
 
 **Extensions** — Plugin system with `setup(api)` / `register(api)` lifecycle, 3 search paths, isolated error handling
@@ -312,6 +312,7 @@ file directly. `O` opens a native system folder dialog via `zenity` (or
 |--------|-------------|
 | `file` | File to open (or directory to open as project) |
 | `--project DIR` | Folder the file tree is rooted at |
+| `--tree` | Open with the file explorer tree visible and focused, file revealed |
 | `--tab-size INT` | Tab width in spaces (default: 4) |
 | `--tabs` | Use literal tab characters instead of spaces |
 | `--large-file-mb INT` | Disable undo snapshots at this size (default: 8 MB) |

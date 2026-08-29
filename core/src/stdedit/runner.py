@@ -11,7 +11,7 @@ The spawned terminal is decorated: the window title is set to
 ``stdedit — run <file>``, the program output is indented two cells so it
 aligns inside a boxed banner naming the interpreter, file, and command, and
 the run ends on a full-width bottom bar showing the exit code plus further
-actions (``r`` rerun, ``e`` edit, ``Enter`` close).  Decoration can be tuned
+actions (``r`` rerun, ``Enter`` close).  Decoration can be tuned
 per run:
 
   ``STDEDIT_RUN_RAW=1``  plain script, no title/banner/colors (test hook)
@@ -325,7 +325,7 @@ def _status_block(colors: bool) -> str:
 def _bar_block(colors: bool) -> str:
     """Full-width bottom bar: exit code + available key actions."""
     bar = (
-        "  local bar=\" exit: $rc  │  [r] rerun  [e] edit  [Enter] close \"\n"
+        "  local bar=\" exit: $rc  │  [r] rerun  [Enter] close \"\n"
         "  while [ \"${#bar}\" -lt $(( _w )) ]; do bar=\"$bar \"; done\n"
     )
     render = (f"  printf '\\x1b[7m%s\\x1b[0m\\n' \"$bar\"\n"
@@ -333,15 +333,14 @@ def _bar_block(colors: bool) -> str:
     return bar + render
 
 
-def _loop_block(quoted: str) -> str:
-    """Loop body: rerun on ``r``, edit-then-rerun on ``e``, close otherwise."""
+def _loop_block() -> str:
+    """Loop body: rerun on ``r``, close on any other key."""
     return (
         "while true; do\n"
         "  run_once\n"
         "  read -n 1 -s -r k || break\n"
         '  case "$k" in\n'
         "    r|R) continue ;;\n"
-        f"    e|E) if command -v stdedit >/dev/null 2>&1; then stdedit {quoted}; fi; continue ;;\n"
         "    *) break ;;\n"
         "  esac\n"
         "done\n"
@@ -356,10 +355,9 @@ def _build_script(path: str, command: str, runtime: str = "", icon: str = "",
     With ``raw=False`` the script sets the terminal window title, frames the
     run in a boxed banner, feeds the program output through a 2-space indenter
     so it lines up inside the box, and finishes on a full-width bottom bar
-    carrying the exit code and further actions (``r`` rerun, ``e`` edit in
-    stdedit, ``Enter`` close).  ``raw=True`` returns the plain script (no
-    decoration); ``colors=False`` keeps the frame and title but emits no ANSI
-    SGR codes.
+    carrying the exit code and further actions (``r`` rerun, ``Enter``
+    close).  ``raw=True`` returns the plain script (no decoration);
+    ``colors=False`` keeps the frame and title but emits no ANSI SGR codes.
     """
     quoted = shlex.quote(os.path.abspath(path))
     out = _temp_out()
@@ -398,7 +396,7 @@ def _build_script(path: str, command: str, runtime: str = "", icon: str = "",
         + f'cd "$(dirname -- {quoted})" 2>/dev/null\n'
         + f"trap 'rm -f {out} 2>/dev/null' EXIT\n"
         + run_once
-        + _loop_block(quoted)
+        + _loop_block()
     )
 
 

@@ -499,5 +499,47 @@ class TestFileOperations(ExplorerTestBase):
         self.assertEqual(e.copy_relative_path(), "")
 
 
+class TestReveal(ExplorerTestBase):
+    def selected_path_of(self, e):
+        selected = e.get_selected()
+        self.assertIsNotNone(selected)
+        return selected[2]
+
+    def test_reveal_top_level_file(self):
+        e = FileExplorer(self.root)
+        e.reveal(os.path.join(self.root, "beta.py"))
+        self.assertEqual(self.selected_path_of(e), os.path.join(self.root, "beta.py"))
+
+    def test_reveal_nested_file_expands_ancestors(self):
+        e = FileExplorer(self.root)
+        target = os.path.join(self.root, "sub_one", "inner.txt")
+        e.reveal(target)
+        self.assertIn(os.path.join(self.root, "sub_one"), e.expanded_dirs)
+        self.assertEqual(self.selected_path_of(e), target)
+
+    def test_reveal_directory_selects_it(self):
+        e = FileExplorer(self.root)
+        target = os.path.join(self.root, "sub_two")
+        e.reveal(target)
+        self.assertEqual(self.selected_path_of(e), target)
+
+    def test_reveal_missing_path_is_safe(self):
+        e = FileExplorer(self.root)
+        before = e.selected_idx
+        e.reveal(os.path.join(self.root, "nope.txt"))
+        self.assertEqual(e.selected_idx, before)
+        self.assertNotEqual(self.selected_path_of(e), os.path.join(self.root, "nope.txt"))
+
+    def test_reveal_exits_search_mode(self):
+        e = FileExplorer(self.root)
+        e.enter_search()
+        e.search("alpha")
+        self.assertTrue(e.searching)
+        target = os.path.join(self.root, "beta.py")
+        e.reveal(target)
+        self.assertFalse(e.searching)
+        self.assertEqual(self.selected_path_of(e), target)
+
+
 if __name__ == "__main__":
     unittest.main()
