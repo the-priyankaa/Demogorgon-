@@ -1307,6 +1307,24 @@ class TestDrawQuickOpenOverlay(unittest.TestCase):
         texts = "".join(t for _, _, t, _ in s.calls)
         self.assertIn("No matches", texts)
 
+    def test_folder_mode_title_and_hint(self):
+        qo = self._qo(_tempfile.mkdtemp(prefix="stdedit-qo-"), "/tmp")
+        qo.mode = "folders"
+        s = self.FakeScr()
+        _draw_quick_open_overlay(s, qo)
+        texts = "".join(t for _, _, t, _ in s.calls)
+        self.assertIn("Open Folder", texts)
+        self.assertIn("open this folder as project root", texts)
+
+    def test_folder_mode_empty_query_prompt(self):
+        qo = self._qo("", "/tmp")
+        qo.mode = "folders"
+        s = self.FakeScr()
+        _draw_quick_open_overlay(s, qo)
+        texts = "".join(t for _, _, t, _ in s.calls)
+        self.assertIn("Open Folder", texts)
+        self.assertIn("Type to search folders", texts)
+
 
 class TestForgetImagePixels(unittest.TestCase):
     def test_drops_pixels_and_error_keeps_view(self):

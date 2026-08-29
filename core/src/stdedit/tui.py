@@ -533,6 +533,16 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 explorer.set_root(os.path.expanduser("~"))
                 explorer.active = False
                 explorer.visible = False
+                quick_open.mode = "files"
+                quick_open.open()
+                stdscr.timeout(50)
+                dashboard_active = False
+                continue
+            if key in ("d", "D"):
+                explorer.set_root(os.path.expanduser("~"))
+                explorer.active = False
+                explorer.visible = False
+                quick_open.mode = "folders"
                 quick_open.open()
                 stdscr.timeout(50)
                 dashboard_active = False
@@ -1034,7 +1044,8 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 else:
                     quick_open.close()
                     stdscr.timeout(-1)
-                    status = "No file selected"
+                    status = ("No folder selected" if quick_open.mode == "folders"
+                              else "No file selected")
             elif key == curses.KEY_UP:
                 quick_open.move_selection(-1)
             elif key == curses.KEY_DOWN:
@@ -1388,6 +1399,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 stdscr.timeout(-1)
                 status = ""
             else:
+                quick_open.mode = "files"
                 quick_open.open()
                 stdscr.timeout(50)
                 status = ""
@@ -2188,7 +2200,8 @@ def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
             pass
 
     # Title
-    title = " Open File "
+    folder_mode = qo.mode == "folders"
+    title = " Open Folder " if folder_mode else " Open File "
     put(top, left, "\u250c" + title.center(inner_w - 2)[:inner_w - 2] + "\u2510",
         curses.A_REVERSE)
     # Input line
@@ -2200,28 +2213,35 @@ def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
     # Separator
     put(top + 2, left, "\u251c" + "\u2500" * (inner_w - 2) + "\u2524", curses.A_DIM)
     # Items
+    kind_raw = "folders" if folder_mode else "files"
     if not items:
         if qo.query:
             if qo.loading:
-                msg = f" Searching...  ({len(qo.files)} files indexed)"
+                msg = f" Searching...  ({len(qo.files)} {kind_raw} indexed)"
             elif qo.scan_error:
                 msg = f" Search error: {qo.scan_error}"
             elif qo.capped:
-                msg = " Index capped (40k files) — type more specifically"
+                msg = f" Index capped (40k {kind_raw}) — type more specifically"
             elif qo.scoring:
                 msg = " Updating results..."
             else:
-                direct = qo._direct_candidate()
+                if folder_mode:
+                    direct = qo._direct_folder()
+                else:
+                    direct = qo._direct_candidate()
                 if direct:
-                    msg = " Press Enter to open typed path"
-                elif qo._direct_folder():
+                    msg = (" Press Enter to open this folder as project root"
+                           if folder_mode else " Press Enter to open typed path")
+                elif not folder_mode and qo._direct_folder():
                     msg = " Press Enter to open this folder as project root"
                 else:
                     msg = " No matches"
             put(top + 3, left + 1, msg, curses.A_DIM)
         else:
-            msg = " Recent files" if qo.show_recent_on_empty else " Type to search files..."
-            put(top + 3, left + 1, msg, curses.A_DIM)
+            empty_hint = (f" Type to search {kind_raw}..." if folder_mode
+                          else f" Recent {kind_raw}" if qo.show_recent_on_empty
+                          else f" Type to search {kind_raw}...")
+            put(top + 3, left + 1, empty_hint, curses.A_DIM)
     else:
         for i, (display_path, is_sel) in enumerate(items):
             if i >= view_h:
@@ -2232,6 +2252,8 @@ def _draw_quick_open_overlay(stdscr, qo: QuickOpen) -> None:
                 short = short[len(qo.root_dir):]
                 if short.startswith("/"):
                     short = short[1:]
+            if folder_mode:
+                short = short + "/"
             # Truncate if too long
             avail = inner_w - 4
             if len(short) > avail:

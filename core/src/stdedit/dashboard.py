@@ -33,7 +33,8 @@ LOGO = [
 
 ACTIONS = [
     ("⌕", "F", "Find File", "Search and open a file"),
-    ("▤", "O", "Open Folder", "Browse a folder in the file tree"),
+    ("▣", "D", "Open Folder", "Search and open a folder"),
+    ("▤", "O", "Open Project", "Browse a folder in the file tree"),
     ("□", "N", "New File", "Start editing a new file"),
     ("◷", "R", "Recent Files", "Open recently edited files"),
     ("↻", "S", "Restore Session", "Open the most recent file"),
@@ -293,7 +294,7 @@ def _draw_shortcuts(stdscr, r: Rect) -> None:
     if r.h <= 0:
         return
     _box(stdscr, r, "SHORTCUTS")
-    rows = ["<Enter>/<Space> : Activate", "F        : Find File", "O        : Open Folder", "N        : New File", "R        : Recent Files", "S        : Restore Session", "C        : Settings", "H / F1   : Help", "Q        : Quit"]
+    rows = ["<Enter>/<Space> : Activate", "F        : Find File", "D        : Open Folder", "O        : Open Project", "N        : New File", "R        : Recent Files", "S        : Restore Session", "C        : Settings", "H / F1   : Help", "Q        : Quit"]
     for i, line in enumerate(rows[: max(0, r.h - 2)]):
         safe_addstr(stdscr, r.y + 1 + i, r.x + 2, _truncate(line, r.w - 4), cp(GREEN_PAIR), r.w - 4)
 

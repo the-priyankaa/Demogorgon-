@@ -12,9 +12,9 @@ class TestQuickOpenAsync(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             real_iter = quick_open._iter_file_index
 
-            def slow_iter(root, excludes=None):
+            def slow_iter(root, excludes=None, dirs_only=False):
                 time.sleep(0.25)
-                yield from real_iter(root, excludes)
+                yield from real_iter(root, excludes, dirs_only)
 
             with mock.patch.object(quick_open, "_iter_file_index", slow_iter):
                 qo = quick_open.QuickOpen(td)
@@ -79,9 +79,9 @@ class TestQuickOpenAsync(unittest.TestCase):
             release = []
             real_iter = quick_open._iter_file_index
 
-            def controlled_iter(root, excludes=None):
+            def controlled_iter(root, excludes=None, dirs_only=False):
                 release.append(True)
-                yield from real_iter(root, excludes)
+                yield from real_iter(root, excludes, dirs_only)
 
             with mock.patch.object(quick_open, "_iter_file_index", controlled_iter):
                 qo = quick_open.QuickOpen(td)
@@ -144,8 +144,8 @@ class TestQuickOpenAsync(unittest.TestCase):
                     pass
             real_iter = quick_open._iter_file_index
 
-            def slow_iter(root, excludes=None):
-                for p in real_iter(root, excludes):
+            def slow_iter(root, excludes=None, dirs_only=False):
+                for p in real_iter(root, excludes, dirs_only):
                     time.sleep(0.02)
                     yield p
 

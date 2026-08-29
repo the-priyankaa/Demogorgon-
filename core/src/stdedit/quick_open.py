@@ -23,8 +23,16 @@ def _is_excluded(path: str, excluded: list[str]) -> bool:
     return any(path == ex or path.startswith(ex + os.sep) for ex in excluded)
 
 
-def _iter_file_index(root_dir: str, exclude_roots: list[str] | None = None) -> Iterable[str]:
-    """Yield searchable files under *root_dir* without blocking callers."""
+def _iter_file_index(
+    root_dir: str,
+    exclude_roots: list[str] | None = None,
+    dirs_only: bool = False,
+) -> Iterable[str]:
+    """Yield searchable paths under *root_dir* without blocking callers.
+
+    With *dirs_only* True, directories are yielded instead of files (which is
+    how the "Open Folder" dashboard action finds folders by name).
+    """
     from .explorer import FileExplorer  # deferred to avoid circular imports
 
     ignore = FileExplorer.ALWAYS_IGNORED_NAMES
@@ -47,17 +55,28 @@ def _iter_file_index(root_dir: str, exclude_roots: list[str] | None = None) -> I
             if _is_excluded(full, excluded):
                 continue
             kept_dirs.append(d)
+            if dirs_only:
+                yield full
         dirnames[:] = kept_dirs
 
+        if dirs_only:
+            continue
         for fname in filenames:
             if any(fname.endswith(s) for s in ignore_suffixes):
                 continue
             yield os.path.join(dirpath, fname)
 
 
-def build_file_index(root_dir: str, exclude_roots: list[str] | None = None) -> List[str]:
-    """Walk *root_dir* and return a sorted list of absolute file paths."""
-    files = list(_iter_file_index(root_dir, exclude_roots))
+def build_file_index(
+    root_dir: str,
+    exclude_roots: list[str] | None = None,
+    dirs_only: bool = False,
+) -> List[str]:
+    """Walk *root_dir* and return a sorted list of absolute paths.
+
+    With *dirs_only* True the list contains directories instead of files.
+    """
+    files = list(_iter_file_index(root_dir, exclude_roots, dirs_only))
     files.sort()
     return files
 
@@ -186,9 +205,11 @@ class QuickOpen:
         root_dir: str = ".",
         exclude_roots: list[str] | None = None,
         show_recent_on_empty: bool = False,
+        mode: str = "files",
     ) -> None:
         self.root_dir: str = os.path.abspath(os.path.expanduser(root_dir))
         self.exclude_roots: list[str] = list(exclude_roots or [])
+        self.mode: str = mode  # "files" or "folders" (folders-only picker)
         self.files: list[str] = []
         self.query: str = ""
         self.results: list[tuple[float, str]] = []
@@ -227,7 +248,10 @@ class QuickOpen:
         try:
             batch: list[tuple[str, str]] = []
             count = 0
-            for path in _iter_file_index(self.root_dir, self.exclude_roots):
+            for path in _iter_file_index(
+                self.root_dir, self.exclude_roots,
+                dirs_only=(self.mode == "folders"),
+            ):
                 if stop_event.is_set():
                     return
                 if count >= self.MAX_FILES:
@@ -417,12 +441,20 @@ class QuickOpen:
 
         An explicitly typed location wins over fuzzy subpath matches so that
         entering a real path always opens that path rather than an unrelated
-        partial-match result.
+        partial-match result.  In folders mode only directories are accepted.
         """
         with self._lock:
-            exact = self._direct_candidate() or self._direct_folder()
-            if exact:
-                return exact
+            typed_only_folder = self._direct_folder()
+            typed_only_file = self._direct_candidate()
+            if self.mode == "folders":
+                if typed_only_folder:
+                    return typed_only_folder
+                if 0 <= self.selected_idx < len(self.results):
+                    path = self.results[self.selected_idx][1]
+                    return path if os.path.isdir(path) else None
+                return None
+            if typed_only_file or typed_only_folder:
+                return typed_only_file or typed_only_folder
             if 0 <= self.selected_idx < len(self.results):
                 return self.results[self.selected_idx][1]
             return None
@@ -431,7 +463,7 @@ class QuickOpen:
         """Return display items without exposing a partially-written list."""
         with self._lock:
             if not self.query:
-                if not self.show_recent_on_empty:
+                if not self.show_recent_on_empty or self.mode == "folders":
                     return []
                 existing = [p for p in recent.get_recent() if os.path.isfile(p)][:limit]
                 return [(p, False) for p in existing]
