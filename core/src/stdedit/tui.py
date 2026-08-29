@@ -1793,7 +1793,7 @@ HELP_SECTIONS = [
         "Ctrl-S              save current file",
         "Ctrl-P              settings / preferences",
         "Ctrl-O              quick open — fuzzy file search",
-        "F5  /  Ctrl-Enter   run current file in an external terminal",
+        "F5  /  Ctrl-Enter   run current file in a terminal (r rerun, e edit, Enter close)",
         "Ctrl-Q              quit (opens a confirmation dialog)",
     ]),
     ("FILE TREE (Ctrl-E panel)", [

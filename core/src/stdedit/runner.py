@@ -8,9 +8,11 @@ shlex, tempfile); the runtimes and the terminal are optional binaries that
 must already be on the system.
 
 The spawned terminal is decorated: the window title is set to
-``stdedit — run <file>`` and the output is framed by a boxed banner naming
-the interpreter, file, and command, plus a colored ``finished — exit N``
-footer.  Decoration can be tuned per run:
+``stdedit — run <file>``, the program output is indented two cells so it
+aligns inside a boxed banner naming the interpreter, file, and command, and
+the run ends on a full-width bottom bar showing the exit code plus further
+actions (``r`` rerun, ``e`` edit, ``Enter`` close).  Decoration can be tuned
+per run:
 
   ``STDEDIT_RUN_RAW=1``  plain script, no title/banner/colors (test hook)
   ``NO_COLOR``           keep the frame and title, drop ANSI colors
@@ -221,20 +223,52 @@ def _sanitize(text: str) -> str:
     return "".join(ch for ch in text if ch >= " " and ch != "\x7f")
 
 
-def _fit(text: str, width: int) -> str:
-    """Truncate *text* to *width* display cells, marking cuts with a '…'."""
+def _wrap(text: str, width: int) -> List[str]:
+    """Wrap *text* to *width* cells at word boundaries (no mid-token cuts).
+
+    Continuation rows keep their text intact so shell paths are never split
+    in a misleading spot; the caller indents them as needed.  A single
+    unbreakable token longer than *width* is hard-split into width-wide
+    pieces.
+    """
     if width < 1:
-        return ""
+        return []
     text = text.replace("\n", " ").replace("\t", " ")
-    if len(text) > width:
-        return text[: width - 1] + "…"
-    return text
+    rows: List[str] = []
+    current = ""
+    for word in text.split(" "):
+        if len(word) > width:
+            if current:
+                rows.append(current)
+                current = ""
+            while len(word) > width:
+                rows.append(word[:width])
+                word = word[width:]
+        candidate = word if not current else current + " " + word
+        if len(candidate) <= width:
+            current = candidate
+        else:
+            if current:
+                rows.append(current)
+            current = word
+    if current:
+        rows.append(current)
+    return rows if rows else [""]
 
 
-def _pad_line(inner: str, width: int) -> str:
-    inner = _fit(inner, max(width - 4, 0))
-    pad = max(width - 4 - len(inner), 0)
-    return "│ " + inner + " " * pad + " │"
+def _pad_line(inner: str, width: int) -> List[str]:
+    """Frame *inner* as one or more ``│ … │`` rows of exactly *width* cells.
+
+    Additional rows wrap long content and are indented two cells inside the
+    box so ``file:`` / ``cmd:`` continuations keep a clean visual indent.
+    """
+    inner_width = max(width - 4, 0)
+    rows = []
+    for idx, piece in enumerate(_wrap(inner, inner_width)):
+        body = ("  " if idx else "") + piece
+        body = body[:inner_width]
+        rows.append("│ " + body + " " * (inner_width - len(body)) + " │")
+    return rows
 
 
 def _bash_squote(text: str) -> str:
@@ -247,9 +281,9 @@ def _frame_lines(path: str, runtime_label: str, icon: str,
     head = f"▶ {runtime_label}  {icon} {base}" if icon else f"▶ {runtime_label}  {base}"
     return [
         "┌" + "─" * (width - 2) + "┐",
-        _pad_line(head, width),
-        _pad_line(f"file: {os.path.abspath(path)}", width),
-        _pad_line(f"cmd: {command}", width),
+        *_pad_line(head, width),
+        *_pad_line(f"file: {os.path.abspath(path)}", width),
+        *_pad_line(f"cmd: {command}", width),
         "├" + "─" * (width - 2) + "┤",
     ]
 
@@ -258,31 +292,59 @@ def _emit_frame(lines: List[str]) -> str:
     return "".join(f"printf '%s\\n' {_bash_squote(line)}\n" for line in lines)
 
 
-def _footer_block(width: int, colors: bool) -> str:
-    """Bash lines that render the closing frame after ``$rc`` is set."""
-    pad = (
+def _helper_block(width: int) -> str:
+    """Bash helper definitions shared by the rerun loop."""
+    return (
+        f"_w={width}\n"
         f"_pad() {{ local -i n=$(( _w - ${{#1}} - 4 )); "
         f"[ \"$n\" -lt 0 ] && n=0; printf '│ %s%*s │\\n' \"$1\" \"$n\" \"\"; }}\n"
+        "_clear() { printf '\\033[2J\\033[H'; }\n"
     )
-    ok = (f"printf '\\x1b[32m'; "
-          f"_pad '✔ finished — exit '\"$rc\"; "
-          f"printf '\\x1b[0m'"
-          if colors else "_pad '✔ finished — exit '\"$rc\"")
-    fail = (f"printf '\\x1b[31m'; "
-            f"_pad '✖ finished — exit '\"$rc\"; "
-            f"printf '\\x1b[0m'"
-            if colors else "_pad '✖ finished — exit '\"$rc\"")
+
+
+def _status_block(colors: bool) -> str:
+    """Color-coded ``✔ / ✖ finished — exit N`` detail plus the box border."""
+    if colors:
+        ok = ("printf '\\x1b[32m'; _pad '✔ finished — exit '\"$rc\"; "
+              "printf '\\x1b[0m'\n")
+        fail = ("printf '\\x1b[31m'; _pad '✖ finished — exit '\"$rc\"; "
+                "printf '\\x1b[0m'\n")
+    else:
+        ok = "_pad '✔ finished — exit '\"$rc\"\n"
+        fail = "_pad '✖ finished — exit '\"$rc\"\n"
     return (
-        pad
-        + f"_w={width}\n"
-        + "if [ \"$rc\" -eq 0 ]; then\n"
-        + f"  {ok}\n"
-        + "else\n"
-        + f"  {fail}\n"
-        + "fi\n"
-        + "_pad '[stdedit] press Enter to close'\n"
-        + f"printf '└'; printf '─%.0s' $(seq 1 $(( _w - 2 ))); printf '┘\\n'\n"
-        + "read -r _\n"
+        "  if [ \"$rc\" -eq 0 ]; then\n"
+        f"    {ok}"
+        "  else\n"
+        f"    {fail}"
+        "  fi\n"
+        "  printf '└'; printf '─%.0s' $(seq 1 $(( _w - 2 ))); printf '┘\\n'\n"
+    )
+
+
+def _bar_block(colors: bool) -> str:
+    """Full-width bottom bar: exit code + available key actions."""
+    bar = (
+        "  local bar=\" exit: $rc  │  [r] rerun  [e] edit  [Enter] close \"\n"
+        "  while [ \"${#bar}\" -lt $(( _w )) ]; do bar=\"$bar \"; done\n"
+    )
+    render = (f"  printf '\\x1b[7m%s\\x1b[0m\\n' \"$bar\"\n"
+              if colors else "  printf '%s\\n' \"$bar\"\n")
+    return bar + render
+
+
+def _loop_block(quoted: str) -> str:
+    """Loop body: rerun on ``r``, edit-then-rerun on ``e``, close otherwise."""
+    return (
+        "while true; do\n"
+        "  run_once\n"
+        "  read -n 1 -s -r k || break\n"
+        '  case "$k" in\n'
+        "    r|R) continue ;;\n"
+        f"    e|E) if command -v stdedit >/dev/null 2>&1; then stdedit {quoted}; fi; continue ;;\n"
+        "    *) break ;;\n"
+        "  esac\n"
+        "done\n"
     )
 
 
@@ -291,10 +353,13 @@ def _build_script(path: str, command: str, runtime: str = "", icon: str = "",
                   width: int = _STDEDIT_RUN_WIDTH) -> str:
     """Build the ``bash -c`` payload for *path* and *command*.
 
-    With ``raw=False`` the script sets the terminal window title and frames
-    the run in a boxed banner + colored exit footer.  ``raw=True`` returns
-    the plain script (no decoration); ``colors=False`` keeps the frame and
-    title but emits no ANSI SGR codes.
+    With ``raw=False`` the script sets the terminal window title, frames the
+    run in a boxed banner, feeds the program output through a 2-space indenter
+    so it lines up inside the box, and finishes on a full-width bottom bar
+    carrying the exit code and further actions (``r`` rerun, ``e`` edit in
+    stdedit, ``Enter`` close).  ``raw=True`` returns the plain script (no
+    decoration); ``colors=False`` keeps the frame and title but emits no ANSI
+    SGR codes.
     """
     quoted = shlex.quote(os.path.abspath(path))
     out = _temp_out()
@@ -316,14 +381,24 @@ def _build_script(path: str, command: str, runtime: str = "", icon: str = "",
         title_text += f" ({label})"
     title = ("printf '\\033]0;%s\\007' '"
              + title_text.replace("'", "'\\''") + "'\n")
+    run_once = (
+        "run_once() {\n"
+        + "  _clear\n"
+        + _emit_frame(_frame_lines(path, label, icon, command, width))
+        + f"  {{ {command}; }} 2>&1 | sed 's/^/  /'\n"
+        + "  rc=${PIPESTATUS[0]}\n"
+        + "  echo\n"
+        + _status_block(colors)
+        + _bar_block(colors)
+        + "}\n"
+    )
     return (
         title
-        + _emit_frame(_frame_lines(path, label, icon, command, width))
+        + _helper_block(width)
         + f'cd "$(dirname -- {quoted})" 2>/dev/null\n'
         + f"trap 'rm -f {out} 2>/dev/null' EXIT\n"
-        + f"{command}\n"
-        + "rc=$?\n"
-        + _footer_block(width, colors=colors)
+        + run_once
+        + _loop_block(quoted)
     )
 
 

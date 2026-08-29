@@ -168,8 +168,13 @@ class RunFileTests(unittest.TestCase):
         self.assertIn('cd "$(dirname --', script)
         self.assertRegExpIn(script, r"hello\.py")
         self.assertIn("python3", script)
-        self.assertIn("press Enter to close", script)
-        self.assertIn("read -r _", script)
+        self.assertIn("[Enter] close", script)
+        self.assertIn("[r] rerun", script)
+        self.assertIn("[e] edit", script)
+        self.assertIn("exit: $rc", script)
+        self.assertIn("read -n 1 -s -r", script)
+        self.assertIn("PIPESTATUS[0]", script)
+        self.assertIn("2>&1 | sed 's/^/  /'", script)
         self.assertTrue(kwargs.get("start_new_session"))
 
     def test_no_terminal_reports_reason(self):
@@ -305,13 +310,15 @@ class DecorationTests(unittest.TestCase):
             "/tmp/a.py", "Python 3", "🐍", "python3 /tmp/a.py", width=70)
         self.assertIn("🐍", lines[1])
 
-    def test_long_path_is_truncated_and_still_fits(self):
+    def test_long_path_wraps_to_indented_continuation_rows(self):
         long = "/tmp/" + "y" * 200 + "/sample.py"
         lines = runner._frame_lines(
             long, "Python 3", "", f"python3 {long}", width=70)
         for line in lines:
             self.assertLessEqual(len(line), 70, repr(line))
-        self.assertIn("…", "".join(lines[1:4]))
+        joined = "\n".join(lines[1:5])
+        self.assertNotIn("…", joined)
+        self.assertIn("│   /tmp/", joined)
 
     def test_title_osc_carries_basename_and_runtime(self):
         s = runner._build_script(
@@ -379,6 +386,39 @@ class DecorationTests(unittest.TestCase):
         self.assertTrue(ok)
         script = CAPTURE[0][0][-1]
         self.assertNotIn(glyph, script)
+
+    def test_built_script_indents_program_output(self):
+        s = runner._build_script(
+            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="")
+        self.assertIn("2>&1 | sed 's/^/  /'", s)
+        self.assertIn("rc=${PIPESTATUS[0]}", s)
+        self.assertIn("{ python3 /tmp/a.py; }", s)
+
+    def test_built_script_bottom_bar_and_keys(self):
+        s = runner._build_script(
+            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="")
+        self.assertIn('bar=" exit: $rc  │  [r] rerun  [e] edit  [Enter] close "', s)
+        self.assertIn("r|R) continue", s)
+        self.assertIn('e|E) if command -v stdedit', s)
+        self.assertIn("stdedit /tmp/a.py", s)
+        self.assertIn("read -n 1 -s -r k", s)
+        self.assertIn("run_once", s)
+
+    def test_bottom_bar_honors_no_color(self):
+        s = runner._build_script(
+            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="",
+            colors=False)
+        self.assertIn(" exit: $rc ", s)
+        self.assertIn("[r] rerun", s)
+        self.assertNotIn("\\x1b[7m", s)
+
+    def test_compile_script_wraps_cmd_line_without_cutting_path(self):
+        s = runner._build_script(
+            "/tmp/long/dir/name/prog.c",
+            "gcc /tmp/long/dir/name/prog.c -o /tmp/stdedit-run-4242 "
+            "&& /tmp/stdedit-run-4242", runtime="gcc", icon="")
+        self.assertIn("│   /tmp/stdedit-run-4242", s)
+        self.assertNotIn("stdedit-run-42…", s)
 
 
 if __name__ == "__main__":

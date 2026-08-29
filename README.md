@@ -56,8 +56,7 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
 - Help (`Ctrl-H` / `F1`): scrollable keybinding reference
 
 **Git & GitHub**
-- Branch detection, status counts, ahead/behind upstream
-- Stage / unstage / commit / push / pull / stash
+- Branch detection, status counts, ahead/behind upstream- Stage / unstage / commit / push / pull / stash
 - Branch listing and switching
 - Issues (list / close / reopen) via `gh` CLI
 - Pull requests (list / checkout / merge) via `gh` CLI
@@ -82,6 +81,15 @@ PYTHONPATH=src python3 -m stdedit.main myfile.py
   Store your Codeium personal API key at
   `~/.config/stdedit/codeium_key`; suggestions silently skip when the key
   is missing or the API is unreachable.
+
+**Run Current File** (`F5` / `Ctrl-Enter`)
+- Launches the file in an external terminal (kitty, gnome-terminal, …) with
+  the right runtime per extension (Python, Node/tsx, gcc/g++, rustc, go, …)
+- Output (stdout + stderr) is indented to align inside the boxed frame, with
+  long `cmd:`/`file:` lines wrapped to indented continuation rows
+- A full-width bottom bar shows the exit code (green `✔` / red `✖`) and what
+  to do next: `r` rerun, `e` edit in stdedit (then rerun), `Enter` close
+- Interactive/curses programs (htop, vim) don't render under the output pipe
 
 **Extensions** — Plugin system with `setup(api)` / `register(api)` lifecycle, 3 search paths, isolated error handling
 
