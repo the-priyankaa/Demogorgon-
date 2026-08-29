@@ -54,6 +54,7 @@ from . import imageviewer
 from . import pickdir
 from . import suggest
 from . import codeium
+from . import runner
 
 _COLOR_PAIRS = {
     "keyword": 1,
@@ -376,8 +377,39 @@ def _read_bracketed_paste(stdscr) -> str:
             return "".join(content)
 
 
-# ---------------------------------------------------------------------- #
-# Find / Replace state (module-level, persists across frames)
+def _is_ctrl_enter_csi(stdscr) -> bool:
+    """Return True if the current input is Ctrl+Enter and consume it.
+
+    Some terminals send Ctrl+Enter as its own CSI sequence rather than a
+    bare ``\\r`` (which is indistinguishable from Enter).  Recognized forms:
+      ``ESC [ 1 3 ; 5 u``   (modified-key / CSI-u protocol, e.g. kitty)
+      ``ESC [ 2 7 ; 5 1 3 ~`` (classic xterm encoding)
+    The main loop has already consumed ``ESC`` but not the ``[``.
+
+    When the sequence does not match, every character read here is pushed
+    back with ``ungetch`` so the bracketed-paste parser below sees the
+    untouched stream (a plain ``ESC [`` prefix is shared by both).
+    """
+    stdscr.nodelay(True)
+    try:
+        consumed = []
+        for _ in range(16):
+            ch = stdscr.getch()
+            if ch == -1:
+                break
+            consumed.append(chr(ch))
+            # End of a CSI code is a single byte in @-~; the leading '[' is
+            # part of the sequence, not its terminator.
+            if 0x40 <= ch <= 0x7E and ch != ord("["):
+                break
+        seq = "".join(consumed)
+        if seq in ("[13;5u", "[27;5;13~"):
+            return True
+        for c in reversed(consumed):
+            curses.ungetch(ord(c))
+        return False
+    finally:
+        stdscr.nodelay(False)
 # ---------------------------------------------------------------------- #
 _search: dict = {
     "query": "",
@@ -928,6 +960,14 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                                            view_h)
             elif key in ("q", "\x1b", "\n", "\r"):
                 show_help = False
+            continue
+
+        # Run the current file in an external terminal (F5 / Ctrl+Enter).
+        # Handled here, before the ESC dispatch, because Ctrl+Enter arrives
+        # as an ESC-prefixed CSI sequence that tree/popup handling would
+        # otherwise misread.
+        if key == curses.KEY_F5 or (key == "\x1b" and _is_ctrl_enter_csi(stdscr)):
+            status = _run_current_file(buf)
             continue
 
         # Image viewer toggle: current file is an image (Ctrl-\)
@@ -1753,6 +1793,7 @@ HELP_SECTIONS = [
         "Ctrl-S              save current file",
         "Ctrl-P              settings / preferences",
         "Ctrl-O              quick open — fuzzy file search",
+        "F5  /  Ctrl-Enter   run current file in an external terminal",
         "Ctrl-Q              quit (opens a confirmation dialog)",
     ]),
     ("FILE TREE (Ctrl-E panel)", [
@@ -1859,6 +1900,23 @@ def is_help_toggle(key, tree_active):
     Raw Ctrl-H (\\x08) and F1 work anywhere.
     """
     return key == "\x08" or key == curses.KEY_F1
+
+
+def _run_current_file(buf) -> str:
+    """Open the current file in an external terminal and run it.
+
+    Auto-saves unsaved edits first (quietly), then delegates to
+    ``runner.run_file``.  Returns the status-bar text (success or reason).
+    """
+    if not buf.filename:
+        return "Nothing to run — open or save a file first"
+    if buf.modified:
+        try:
+            buf.save()
+        except OSError as exc:
+            return f"Could not save before running: {exc}"
+    ok, msg = runner.run_file(buf.filename)
+    return msg
 
 
 def swallowed_by_tree(key) -> bool:
