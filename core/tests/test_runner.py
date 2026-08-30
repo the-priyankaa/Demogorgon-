@@ -27,10 +27,12 @@ class RunCommandForTests(unittest.TestCase):
         self.assertIsNotNone(cmd, reason)
         return cmd
 
-    def test_python_uses_python3(self):
+    def test_python_uses_unbuffered_python3(self):
         cmd = self.cmd_for("proj/hello.py", {"python3"})
-        self.assertTrue(cmd.startswith("python3 "), cmd)
+        self.assertTrue(cmd.startswith("python3 -u "), cmd)
         self.assertIn("hello.py", cmd)
+        self.assertEqual("python3", runner.run_command_for(
+            "proj/hello.py", _which=make_which({"python3"}))[1].split()[0])
 
     def test_paths_with_spaces_are_shell_quoted(self):
         cmd = self.cmd_for("my proj/hello world.py", {"python3"})
@@ -82,7 +84,7 @@ class RunCommandForTests(unittest.TestCase):
         self.assertIn("not found", reason)
 
     def test_perl_ruby_php_lua_r(self):
-        self.assertIn("perl", self.cmd_for("script.pl", {"perl"}))
+        self.assertIn("PERLIO=:unix perl", self.cmd_for("script.pl", {"perl"}))
         self.assertIn("ruby", self.cmd_for("app.rb", {"ruby"}))
         self.assertIn("php", self.cmd_for("page.php", {"php"}))
         self.assertIn("lua", self.cmd_for("mod.lua", {"lua"}))
@@ -157,7 +159,7 @@ class RunFileTests(unittest.TestCase):
         ok, status = runner.run_file(
             "proj/hello.py",
             _which=make_which({"python3", "kitty"}),
-            _popen=fake_popen, env={})
+            _popen=fake_popen, env={}, pty=False)
         self.assertTrue(ok, status)
         self.assertRegex(status, r"Running: python3 .*hello\.py .*kitty")
         self.assertEqual(1, len(CAPTURE))
@@ -168,14 +170,28 @@ class RunFileTests(unittest.TestCase):
         self.assertIn('cd "$(dirname --', script)
         self.assertRegExpIn(script, r"hello\.py")
         self.assertIn("python3", script)
+        self.assertIn("  stdedit · run", script)
         self.assertIn("[Enter] close", script)
         self.assertIn("[r] rerun", script)
         self.assertNotIn("[e] edit", script)
-        self.assertIn("exit: $rc", script)
+        self.assertIn("finished (exit '\"$rc\"')", script)
         self.assertIn("read -n 1 -s -r", script)
-        self.assertIn("PIPESTATUS[0]", script)
-        self.assertIn("2>&1 | sed 's/^/  /'", script)
+        self.assertNotIn("PIPESTATUS", script)
+        self.assertRegExpIn(script, r"\{ python3 -u .*hello\.py; \} 2>&1")
+        self.assertNotIn("python3 -c", script)
         self.assertTrue(kwargs.get("start_new_session"))
+
+    def test_run_python_uses_pty_wrapper(self):
+        ok, status = runner.run_file(
+            "proj/hello.py",
+            _which=make_which({"python3", "kitty"}),
+            _popen=fake_popen, env={}, pty=True)
+        self.assertTrue(ok, status)
+        script = CAPTURE[0][0][-1]
+        self.assertIn("script -qec 'python3 -u ", script)
+        self.assertIn("' /dev/null; } 2>&1", script)
+        self.assertNotIn("PIPESTATUS", script)
+        self.assertNotIn("python3 -c", script)
 
     def test_no_terminal_reports_reason(self):
         ok, status = runner.run_file(
@@ -282,48 +298,31 @@ class RunCurrentFileTests(unittest.TestCase):
 
 
 class DecorationTests(unittest.TestCase):
-    """The spawned terminal is framed by a boxed banner + colored footer."""
+    """The spawned terminal shows a plain header + passthrough output."""
 
     def setUp(self):
         CAPTURE.clear()
 
-    def test_frame_geometry_all_lines_exact_width(self):
-        lines = runner._frame_lines(
-            "/tmp/a.py", "Python 3", "", "python3 /tmp/a.py", width=70)
-        for line in lines:
-            self.assertEqual(70, len(line), repr(line))
-        self.assertTrue(lines[0].startswith("┌"))
-        self.assertTrue(lines[-1].startswith("├"))
+    def test_plain_header_names_file_and_runtime(self):
+        s = runner._build_script(
+            "/tmp/run/sample.py", "python3 /tmp/run/sample.py",
+            runtime="python3", icon="", pty=False)
+        self.assertIn("  stdedit · run sample.py (Python 3)", s)
+        self.assertIn("sample.py", s)
+        for forbidden in ("┌", "│", "├", "└", "▶", "file: ", "cmd: ",
+                          "YUKI — Python 3"):
+            self.assertNotIn(forbidden, s)
 
-    def test_frame_header_labels_file_and_command(self):
-        lines = runner._frame_lines(
-            "/tmp/run/sample.py", "Python 3", "", "python3 /tmp/run/sample.py",
-            width=70)
-        self.assertIn("▶", lines[1])
-        self.assertIn("YUKI", lines[1])
-        self.assertIn("Python 3", lines[1])
-        self.assertIn("sample.py", lines[1])
-        self.assertIn("file: /tmp/run/sample.py", lines[2])
-        self.assertIn("cmd: python3 /tmp/run/sample.py", lines[3])
-
-    def test_frame_keeps_geometry_with_icon(self):
-        lines = runner._frame_lines(
-            "/tmp/a.py", "Python 3", "🐍", "python3 /tmp/a.py", width=70)
-        self.assertIn("🐍", lines[1])
-
-    def test_long_path_wraps_to_indented_continuation_rows(self):
-        long = "/tmp/" + "y" * 200 + "/sample.py"
-        lines = runner._frame_lines(
-            long, "Python 3", "", f"python3 {long}", width=70)
-        for line in lines:
-            self.assertLessEqual(len(line), 70, repr(line))
-        joined = "\n".join(lines[1:5])
-        self.assertNotIn("…", joined)
-        self.assertIn("│   /tmp/", joined)
+    def test_header_keeps_icon_when_given(self):
+        s = runner._build_script(
+            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="🐍",
+            pty=False)
+        self.assertIn("  stdedit · run 🐍 a.py (Python 3)", s)
 
     def test_title_osc_carries_basename_and_runtime(self):
         s = runner._build_script(
-            "/tmp/my.py", "python3 /tmp/my.py", runtime="python3", icon="")
+            "/tmp/my.py", "python3 /tmp/my.py", runtime="python3", icon="",
+            pty=False)
         self.assertIn("\\033]0;%s\\007", s)
         self.assertIn("YUKI — run my.py (Python 3)", s)
         self.assertTrue(s.startswith("printf "), s)
@@ -331,30 +330,34 @@ class DecorationTests(unittest.TestCase):
     def test_tricky_filenames_are_escaped_in_emitted_lines(self):
         s = runner._build_script(
             "/tmp/odd 'name' (x).py", "python3 /tmp/odd 'name' (x).py",
-            runtime="python3", icon="")
+            runtime="python3", icon="", pty=False)
         self.assertIn("'\\''", s)
         self.assertNotIn("syntax error", s)
 
     def test_colors_active_by_default(self):
         s = runner._build_script(
-            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="")
+            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="",
+            pty=False)
         self.assertIn("\\x1b[32m", s)
         self.assertIn("\\x1b[31m", s)
         self.assertIn("\\x1b[0m", s)
 
-    def test_no_color_keeps_frame_drops_sgr(self):
+    def test_no_color_drops_sgr_keeps_header(self):
         s = runner._build_script(
             "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="",
-            colors=False)
-        self.assertIn("┌", s)
+            colors=False, pty=False)
+        self.assertIn("  stdedit · run a.py (Python 3)", s)
         self.assertIn("YUKI — run", s)
-        self.assertNotIn("\\x1b[", s)
+        self.assertIn("  stdedit — ✔ finished", s)
+        self.assertNotIn("\\x1b[32m", s)
+        self.assertNotIn("\\x1b[31m", s)
+        self.assertNotIn("\\x1b[7m", s)
 
     def test_raw_script_matches_plain_template(self):
         s = runner._build_script(
             "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="",
-            raw=True)
-        for forbidden in ("┌", "▶", "\\033]0;", "\\x1b["):
+            raw=True, pty=False)
+        for forbidden in ("┌", "╔", "▶", "\\033]0;", "\\x1b["):
             self.assertNotIn(forbidden, s)
         self.assertIn('cd "$(dirname --', s)
         self.assertIn('echo "[YUKI] finished (exit $rc) — press Enter to close"', s)
@@ -366,7 +369,7 @@ class DecorationTests(unittest.TestCase):
             _popen=fake_popen, env={"STDEDIT_RUN_RAW": "1"})
         self.assertTrue(ok)
         script = CAPTURE[0][0][-1]
-        self.assertNotIn("┌", script)
+        self.assertNotIn("╔", script)
         self.assertNotIn("▶", script)
 
     def test_run_file_respects_no_color_env(self):
@@ -375,8 +378,10 @@ class DecorationTests(unittest.TestCase):
             _popen=fake_popen, env={"NO_COLOR": "1"})
         self.assertTrue(ok)
         script = CAPTURE[0][0][-1]
-        self.assertNotIn("\\x1b[", script)
-        self.assertIn("┌", script)
+        self.assertNotIn("\\x1b[32m", script)
+        self.assertNotIn("\\x1b[31m", script)
+        self.assertNotIn("╔", script)
+        self.assertIn("✔ finished", script)
 
     def test_run_file_omits_icon_when_disabled(self):
         glyph = icons.icon_for_file("proj/a.py", True)
@@ -388,40 +393,77 @@ class DecorationTests(unittest.TestCase):
         script = CAPTURE[0][0][-1]
         self.assertNotIn(glyph, script)
 
-    def test_built_script_indents_program_output(self):
+    def test_run_starts_on_a_blank_line(self):
         s = runner._build_script(
-            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="")
-        self.assertIn("2>&1 | sed 's/^/  /'", s)
-        self.assertIn("rc=${PIPESTATUS[0]}", s)
-        self.assertIn("{ python3 /tmp/a.py; }", s)
+            "/tmp/a.py", "python3 -u /tmp/a.py", runtime="python3", icon="",
+            pty=False)
+        self.assertIn("  stdedit · run a.py (Python 3)'\n", s)
+        self.assertIn("echo\n  { python3 -u /tmp/a.py; } 2>&1", s)
 
-    def test_built_script_bottom_bar_and_keys(self):
+    def test_built_script_passes_output_through_directly(self):
         s = runner._build_script(
-            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="")
-        self.assertIn('bar=" exit: $rc  │  [r] rerun  [Enter] close "', s)
+            "/tmp/a.py", "python3 -u /tmp/a.py", runtime="python3", icon="",
+            pty=False)
+        self.assertIn("{ python3 -u /tmp/a.py; } 2>&1", s)
+        self.assertIn("rc=$?", s)
+        self.assertNotIn("PIPESTATUS", s)
+        self.assertNotIn("python3 -c", s)
+
+    def test_pty_wrap_single_quotes_the_command(self):
+        wrapped = runner._pty_wrap("python3 -u '/a b.py'")
+        self.assertTrue(wrapped.startswith("script -qec '"), wrapped)
+        self.assertTrue(wrapped.endswith(" /dev/null"), wrapped)
+        self.assertIn("'\\''", wrapped)
+        self.assertNotIn("syntax error", wrapped)
+
+    def test_built_script_pty_path_wraps_command_once(self):
+        s = runner._build_script(
+            "/tmp/a.py", "python3 -u /tmp/a.py", runtime="python3", icon="",
+            pty=True)
+        self.assertEqual(1, s.count("script -qec '"), s)
+        self.assertIn("{ script -qec 'python3 -u /tmp/a.py' /dev/null; } "
+                      "2>&1", s)
+        self.assertNotIn("PIPESTATUS", s)
+        self.assertNotIn("python3 -c", s)
+
+    def test_built_script_summary_and_keys(self):
+        s = runner._build_script(
+            "/tmp/a.py", "python3 -u /tmp/a.py", runtime="python3", icon="",
+            pty=False)
+        self.assertIn("— [r] rerun · [Enter] close", s)
+        self.assertIn("[Enter] close", s)
+        self.assertIn("[r] rerun", s)
+        self.assertIn("finished (exit '\"$rc\"')", s)
         self.assertIn("r|R) continue", s)
         self.assertNotIn("e|E)", s)
         self.assertNotIn("command -v stdedit", s)
         self.assertNotIn("[e] edit", s)
+        self.assertNotIn("run_once", s)
         self.assertIn("read -n 1 -s -r k", s)
-        self.assertIn("run_once", s)
+        self.assertNotIn("PIPESTATUS", s)
+        for forbidden in ("┌", "│", "├", "└", "▶"):
+            self.assertNotIn(forbidden, s)
 
-    def test_bottom_bar_honors_no_color(self):
+    def test_built_script_summary_honors_no_color(self):
         s = runner._build_script(
-            "/tmp/a.py", "python3 /tmp/a.py", runtime="python3", icon="",
-            colors=False)
-        self.assertIn(" exit: $rc ", s)
+            "/tmp/a.py", "python3 -u /tmp/a.py", runtime="python3", icon="",
+            colors=False, pty=False)
+        self.assertIn("  stdedit — ✔ finished (exit '\"$rc\"')", s)
         self.assertIn("[r] rerun", s)
         self.assertIn("[Enter] close", s)
+        self.assertNotIn("\\x1b[32m", s)
+        self.assertNotIn("\\x1b[31m", s)
         self.assertNotIn("\\x1b[7m", s)
 
-    def test_compile_script_wraps_cmd_line_without_cutting_path(self):
+    def test_compile_script_keeps_temp_binary_cleanup(self):
         s = runner._build_script(
             "/tmp/long/dir/name/prog.c",
             "gcc /tmp/long/dir/name/prog.c -o /tmp/stdedit-run-4242 "
-            "&& /tmp/stdedit-run-4242", runtime="gcc", icon="")
-        self.assertIn("│   /tmp/stdedit-run-4242", s)
-        self.assertNotIn("stdedit-run-42…", s)
+            "&& /tmp/stdedit-run-4242", runtime="gcc", icon="", pty=False)
+        self.assertIn("-o /tmp/stdedit-run-4242 && /tmp/stdedit-run-4242", s)
+        self.assertIn("gcc /tmp/long/dir/name/prog.c -o /tmp/stdedit-run-4242 "
+                      "&& /tmp/stdedit-run-4242; } 2>&1", s)
+        self.assertRegex(s, r"trap 'rm -f /tmp/stdedit-run-\d+ 2>/dev/null' EXIT")
 
 
 if __name__ == "__main__":

@@ -8,14 +8,19 @@ shlex, tempfile); the runtimes and the terminal are optional binaries that
 must already be on the system.
 
 The spawned terminal is decorated: the window title is set to
-``YUKI — run <file>``, the program output is indented two cells so it
-aligns inside a boxed banner naming the interpreter, file, and command, and
-the run ends on a full-width bottom bar showing the exit code plus further
-actions (``r`` rerun, ``Enter`` close).  Decoration can be tuned
-per run:
+``YUKI — run <file>``, a small indented header names the file and
+interpreter, and the program output flows through unchanged (plain
+passthrough, no framing, no wrapping), so lines and ANSI colors appear
+exactly as the program writes them.  A blank line separates the start of
+execution from the header.  Each run finishes on a plain summary line
+showing the exit code plus further actions (``r`` rerun, ``Enter`` close);
+``r`` reruns in place while any other key closes the window.  When
+util-linux ``script`` is available the program runs on a pseudo-terminal, so
+``print`` output streams live for every language instead of collecting in a
+block buffer.  Decoration can be tuned per run:
 
-  ``STDEDIT_RUN_RAW=1``  plain script, no title/banner/colors (test hook)
-  ``NO_COLOR``           keep the frame and title, drop ANSI colors
+  ``STDEDIT_RUN_RAW=1``  plain script, no title/header/colors (test hook)
+  ``NO_COLOR``           keep the header and title, drop ANSI colors
   ``STDEDIT_ICONS=0``    omit the file icon (matches the editor)
 
 ``STDEDIT_TERMINAL`` overrides terminal detection (a command name),
@@ -34,8 +39,8 @@ from typing import Callable, List, Optional, Tuple
 
 from . import icons
 
-# Fixed frame width in terminal cells.  Content is laid out in Python so the
-# border stays pixel-exact regardless of multibyte glyphs.
+# Width knob for the header/summary layout.  The passthrough output is not
+# wrapped or framed, so this only reserves headroom for future boxed layouts.
 _STDEDIT_RUN_WIDTH = 70
 
 _STDEDIT_TERMINAL_ENV = "STDEDIT_TERMINAL"
@@ -63,8 +68,8 @@ _TERMINAL_LAUNCHERS: List[Tuple[str, List[str]]] = [
 # "{path}" is the quoted absolute file path; "{out}" is a per-run temp binary
 # (used by compiled languages, removed by the wrapper script).
 _RUNTIMES = {
-    ".py":    ("python3", "python3 {path}"),
-    ".pyw":   ("python3", "python3 {path}"),
+    ".py":    ("python3", "python3 -u {path}"),
+    ".pyw":   ("python3", "python3 -u {path}"),
     ".js":    ("node", "node {path}"),
     ".mjs":   ("node", "node {path}"),
     ".jsx":   ("npx", "npx --yes tsx {path}"),
@@ -82,7 +87,7 @@ _RUNTIMES = {
     ".sh":    ("bash", "bash {path}"),
     ".bash":  ("bash", "bash {path}"),
     ".zsh":   ("zsh", "zsh {path}"),
-    ".pl":    ("perl", "perl {path}"),
+    ".pl":    ("perl", "PERLIO=:unix perl {path}"),
     ".rb":    ("ruby", "ruby {path}"),
     ".php":   ("php", "php {path}"),
     ".lua":   ("lua", "lua {path}"),
@@ -98,7 +103,7 @@ _NON_RUNNABLE = frozenset({".md", ".markdown", ".html", ".htm", ".css", ".scss",
                            ".sass", ".json", ".yaml", ".yml", ".sql", ".xml",
                            ".svg", ".xhtml", ".txt"})
 
-# Display names for the frame banner, keyed by the runtime executable.
+# Display names for the run header, keyed by the runtime executable.
 _RUNTIME_LABELS = {
     "python": "Python",
     "python3": "Python 3",
@@ -182,12 +187,14 @@ def run_file(
     _which: Callable[[str], Optional[str]] = shutil.which,
     _popen: Callable[..., object] = subprocess.Popen,
     env: dict | None = None,
+    pty: Optional[bool] = None,
 ) -> Tuple[bool, str]:
     """Open *path* in an external terminal and run it.
 
     Returns (ok, status): on success status names the interpreter and the
     terminal used; on failure it explains why (no terminal, no runtime, no
-    runner, launch error).
+    runner, launch error).  ``pty`` (True/False/None) pins whether the run
+    gets a pseudo-terminal; None auto-detects util-linux ``script``.
     """
     if not path:
         return False, "Nothing to run"
@@ -203,7 +210,7 @@ def run_file(
     runtime = display.split(None, 1)[0] if display else ""
     glyph = icons.icon_for_file(path, icons.enabled_from_env(environ))
     script = _build_script(path, command, runtime=runtime, icon=glyph,
-                           raw=raw, colors=colors)
+                           raw=raw, colors=colors, pty=pty)
     argv = launcher + ["bash", "-c", script]
     try:
         _popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -223,141 +230,109 @@ def _sanitize(text: str) -> str:
     return "".join(ch for ch in text if ch >= " " and ch != "\x7f")
 
 
-def _wrap(text: str, width: int) -> List[str]:
-    """Wrap *text* to *width* cells at word boundaries (no mid-token cuts).
-
-    Continuation rows keep their text intact so shell paths are never split
-    in a misleading spot; the caller indents them as needed.  A single
-    unbreakable token longer than *width* is hard-split into width-wide
-    pieces.
-    """
-    if width < 1:
-        return []
-    text = text.replace("\n", " ").replace("\t", " ")
-    rows: List[str] = []
-    current = ""
-    for word in text.split(" "):
-        if len(word) > width:
-            if current:
-                rows.append(current)
-                current = ""
-            while len(word) > width:
-                rows.append(word[:width])
-                word = word[width:]
-        candidate = word if not current else current + " " + word
-        if len(candidate) <= width:
-            current = candidate
-        else:
-            if current:
-                rows.append(current)
-            current = word
-    if current:
-        rows.append(current)
-    return rows if rows else [""]
-
-
-def _pad_line(inner: str, width: int) -> List[str]:
-    """Frame *inner* as one or more ``│ … │`` rows of exactly *width* cells.
-
-    Additional rows wrap long content and are indented two cells inside the
-    box so ``file:`` / ``cmd:`` continuations keep a clean visual indent.
-    """
-    inner_width = max(width - 4, 0)
-    rows = []
-    for idx, piece in enumerate(_wrap(inner, inner_width)):
-        body = ("  " if idx else "") + piece
-        body = body[:inner_width]
-        rows.append("│ " + body + " " * (inner_width - len(body)) + " │")
-    return rows
-
-
 def _bash_squote(text: str) -> str:
     return "'" + text.replace("'", "'\\''") + "'"
 
 
-def _frame_lines(path: str, runtime_label: str, icon: str,
-                 command: str, width: int) -> List[str]:
-    base = os.path.basename(path) or path
-    head = f"▶ YUKI — {runtime_label}  {icon} {base}" if icon else f"▶ YUKI — {runtime_label}  {base}"
-    return [
-        "┌" + "─" * (width - 2) + "┐",
-        *_pad_line(head, width),
-        *_pad_line(f"file: {os.path.abspath(path)}", width),
-        *_pad_line(f"cmd: {command}", width),
-        "├" + "─" * (width - 2) + "┤",
-    ]
+SCRIPT_SUPPORTED: Optional[bool] = None
 
 
-def _emit_frame(lines: List[str]) -> str:
-    return "".join(f"printf '%s\\n' {_bash_squote(line)}\n" for line in lines)
+def _script_supported(
+    _which: Callable[[str], Optional[str]] = shutil.which,
+    _run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> bool:
+    """True when a util-linux ``script`` is available for pty runs.
+
+    The result is cached: running under a fake pty makes every language's
+    stdout a real tty, so ``print`` output streams line-by-line instead of
+    disappearing in a block buffer until exit.  Busybox variants are rejected
+    because they lack ``-q``/``-e``.
+    """
+    global SCRIPT_SUPPORTED
+    if SCRIPT_SUPPORTED is not None:
+        return SCRIPT_SUPPORTED
+    exe = _which("script")
+    if exe is None:
+        SCRIPT_SUPPORTED = False
+        return False
+    try:
+        result = _run([exe, "--version"], capture_output=True,
+                      text=True, timeout=2)
+        SCRIPT_SUPPORTED = "util-linux" in (result.stdout or "").lower()
+    except (OSError, ValueError):
+        SCRIPT_SUPPORTED = False
+    return SCRIPT_SUPPORTED
 
 
-def _helper_block(width: int) -> str:
-    """Bash helper definitions shared by the rerun loop."""
-    return (
-        f"_w={width}\n"
-        f"_pad() {{ local -i n=$(( _w - ${{#1}} - 4 )); "
-        f"[ \"$n\" -lt 0 ] && n=0; printf '│ %s%*s │\\n' \"$1\" \"$n\" \"\"; }}\n"
-        "_clear() { printf '\\033[2J\\033[H'; }\n"
-    )
+def _pty_wrap(command: str) -> str:
+    """Prefix *command* so it runs on a pseudo-terminal (``script -qec``)."""
+    return f"script -qec {_bash_squote(command)} /dev/null"
 
 
-def _status_block(colors: bool) -> str:
-    """Color-coded ``✔ / ✖ finished — exit N`` detail plus the box border."""
+def _run_loop_block(colors: bool, run_elem: str) -> str:
+    """Bash lines for the run loop (header already printed once).
+
+    Each iteration begins on a blank line, so the program output always
+    starts on a fresh row underneath the header.  The program streams
+    verbatim (stderr merged), then the loop closes on a plain summary line
+    showing the exit code and the further actions (``r`` rerun, Enter/any
+    key closes).  Pressing ``r`` selects the rerun branch; any other key
+    breaks out of the loop and the window closes.  ``run_elem`` is the
+    pty-wrapped or plain command.
+    """
+    def _summary(mark: str) -> str:
+        return ("_line "
+                + _bash_squote(f"  stdedit — {mark} finished (exit ")
+                + '"$rc"'
+                + _bash_squote(") — [r] rerun · [Enter] close")
+                + "\n")
     if colors:
-        ok = ("printf '\\x1b[32m'; _pad '✔ finished — exit '\"$rc\"; "
-              "printf '\\x1b[0m'\n")
-        fail = ("printf '\\x1b[31m'; _pad '✖ finished — exit '\"$rc\"; "
-                "printf '\\x1b[0m'\n")
+        ok = ("printf '\\x1b[32m'; " + _summary("✔") + "printf '\\x1b[0m'\n")
+        fail = ("printf '\\x1b[31m'; " + _summary("✖") + "printf '\\x1b[0m'\n")
     else:
-        ok = "_pad '✔ finished — exit '\"$rc\"\n"
-        fail = "_pad '✖ finished — exit '\"$rc\"\n"
-    return (
+        ok = _summary("✔")
+        fail = _summary("✖")
+    status = (
         "  if [ \"$rc\" -eq 0 ]; then\n"
         f"    {ok}"
         "  else\n"
         f"    {fail}"
         "  fi\n"
-        "  printf '└'; printf '─%.0s' $(seq 1 $(( _w - 2 ))); printf '┘\\n'\n"
     )
-
-
-def _bar_block(colors: bool) -> str:
-    """Full-width bottom bar: exit code + available key actions."""
-    bar = (
-        "  local bar=\" exit: $rc  │  [r] rerun  [Enter] close \"\n"
-        "  while [ \"${#bar}\" -lt $(( _w )) ]; do bar=\"$bar \"; done\n"
-    )
-    render = (f"  printf '\\x1b[7m%s\\x1b[0m\\n' \"$bar\"\n"
-              if colors else "  printf '%s\\n' \"$bar\"\n")
-    return bar + render
-
-
-def _loop_block() -> str:
-    """Loop body: rerun on ``r``, close on any other key."""
     return (
+        "_line() { printf '%s\\n' \"$1\"; }\n"
         "while true; do\n"
-        "  run_once\n"
-        "  read -n 1 -s -r k || break\n"
-        '  case "$k" in\n'
-        "    r|R) continue ;;\n"
-        "    *) break ;;\n"
-        "  esac\n"
-        "done\n"
+        "  echo\n"
+        f"  {{ {run_elem}; }} 2>&1\n"
+        "  rc=$?\n"
+        "  echo\n"
+        + status
+        + "  read -n 1 -s -r k || break\n"
+        + '  case "$k" in\n'
+        + "    r|R) continue ;;\n"
+        + "    *) break ;;\n"
+        + "  esac\n"
+        + "done\n"
     )
 
 
 def _build_script(path: str, command: str, runtime: str = "", icon: str = "",
                   raw: bool = False, colors: bool = True,
-                  width: int = _STDEDIT_RUN_WIDTH) -> str:
+                  width: int = _STDEDIT_RUN_WIDTH,
+                  pty: Optional[bool] = None) -> str:
     """Build the ``bash -c`` payload for *path* and *command*.
 
-    With ``raw=False`` the script sets the terminal window title, frames the
-    run in a boxed banner, feeds the program output through a 2-space indenter
-    so it lines up inside the box, and finishes on a full-width bottom bar
-    carrying the exit code and further actions (``r`` rerun, ``Enter``
-    close).  ``raw=True`` returns the plain script (no decoration);
-    ``colors=False`` keeps the frame and title but emits no ANSI SGR codes.
+    With ``raw=False`` the script sets the terminal window title, prints a
+    small indented header naming the file and interpreter, and streams the
+    program output through unchanged (plain passthrough — no framing, no
+    wrapping).  Each run starts on a blank line and closes on a plain summary
+    line showing the exit code and further actions (``r`` rerun, Enter/any
+    key closes).  When ``pty`` is unset the program runs on a
+    pseudo-terminal when util-linux ``script`` is present (live output for
+    every language); ``pty=False`` forces the plain run (with unbuffered
+    runtimes), ``pty=True`` forces the pty wrapper.  ``raw=True`` returns
+    the plain script (no decoration); ``colors=False`` keeps the header and
+    title but emits no ANSI SGR colors.
     """
     quoted = shlex.quote(os.path.abspath(path))
     out = _temp_out()
@@ -372,6 +347,8 @@ def _build_script(path: str, command: str, runtime: str = "", icon: str = "",
     )
     if raw:
         return plain
+    use_pty = _script_supported() if pty is None else bool(pty)
+    run_elem = _pty_wrap(command) if use_pty else command
     label = _runtime_label(runtime)
     base = _sanitize(os.path.basename(path) or path)
     title_text = f"YUKI — run {base}"
@@ -379,24 +356,17 @@ def _build_script(path: str, command: str, runtime: str = "", icon: str = "",
         title_text += f" ({label})"
     title = ("printf '\\033]0;%s\\007' '"
              + title_text.replace("'", "'\\''") + "'\n")
-    run_once = (
-        "run_once() {\n"
-        + "  _clear\n"
-        + _emit_frame(_frame_lines(path, label, icon, command, width))
-        + f"  {{ {command}; }} 2>&1 | sed 's/^/  /'\n"
-        + "  rc=${PIPESTATUS[0]}\n"
-        + "  echo\n"
-        + _status_block(colors)
-        + _bar_block(colors)
-        + "}\n"
-    )
+    head = f"  stdedit · run {base}"
+    if icon:
+        head = f"  stdedit · run {icon} {base}"
+    if runtime:
+        head += f" ({label})"
     return (
         title
-        + _helper_block(width)
         + f'cd "$(dirname -- {quoted})" 2>/dev/null\n'
         + f"trap 'rm -f {out} 2>/dev/null' EXIT\n"
-        + run_once
-        + _loop_block()
+        + f"printf '%s\\n' {_bash_squote(head)}\n"
+        + _run_loop_block(colors, run_elem)
     )
 
 
