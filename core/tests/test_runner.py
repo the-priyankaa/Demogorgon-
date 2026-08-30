@@ -111,12 +111,20 @@ class RunCommandForTests(unittest.TestCase):
         self.assertIn("No runner", reason)
 
     def test_non_runnable_types(self):
-        for fname in ("doc.md", "page.html", "style.css", "data.json",
-                      "config.yaml", "query.sql", "graph.xml", "notes.txt"):
+        for fname in ("style.css", "data.json", "config.yaml", "query.sql",
+                      "graph.xml", "notes.txt"):
             cmd, reason = runner.run_command_for(
                 fname, _which=make_which({"python3"}))
             self.assertIsNone(cmd, fname)
             self.assertIn("No run command", reason, fname)
+
+    def test_web_extensions_report_browser_reason(self):
+        for fname in ("index.html", "page.htm", "view.xhtml", "pic.svg",
+                      "notes.md", "README.markdown"):
+            cmd, reason = runner.run_command_for(
+                fname, _which=make_which({"python3"}))
+            self.assertIsNone(cmd, fname)
+            self.assertIn("browser via a local server", reason, fname)
 
 
 class TerminalLauncherTests(unittest.TestCase):
@@ -211,6 +219,86 @@ class RunFileTests(unittest.TestCase):
         out = outs.pop()
         self.assertIn(f"-o {out}", command)
         self.assertIn(f"rm -f {out}", command)
+
+    def test_html_serves_locally_and_opens_default_browser(self):
+        ok, status = runner.run_file(
+            "/tmp/page.html",
+            _which=make_which({"kitty", "python3", "xdg-open"}),
+            _popen=fake_popen, env={})
+        self.assertTrue(ok, status)
+        self.assertRegex(status,
+                         r"Running: http://127\.0\.0\.1:\d+/page\.html \(kitty\)")
+        self.assertEqual(1, len(CAPTURE))
+        argv, _, kwargs = CAPTURE[0]
+        self.assertEqual(argv[1:3], ["-e", "bash"])
+        script = argv[-1]
+        self.assertRegex(script, r"python3 -m http\.server --bind 127\.0\.0\.1 \d+"
+                                 r" --directory /tmp & server_pid=\$!;")
+        self.assertRegExpIn(script, r"xdg-open http://127\.0\.0\.1:\d+/page\.html")
+        self.assertRegExpIn(script, r"/dev/tcp/127\.0\.0\.1/\d+")
+        self.assertIn("server_pid=$!;", script)
+        self.assertIn("wait $server_pid; trap - INT", script)
+        self.assertIn("trap 'kill $server_pid 2>/dev/null' INT; ", script)
+        self.assertNotIn("script -qec", script)
+        self.assertTrue(kwargs.get("start_new_session"))
+
+    def test_markdown_and_svg_also_serve_in_browser(self):
+        for fname, keep in (("/tmp/readme.md", "readme.md"),
+                            ("/tmp/pic.svg", "pic.svg"),
+                            ("/tmp/view.xhtml", "view.xhtml")):
+            CAPTURE.clear()
+            ok, _status = runner.run_file(
+                fname, _which=make_which({"kitty", "xdg-open"}),
+                _popen=fake_popen, env={})
+            self.assertTrue(ok, fname)
+            script = CAPTURE[0][0][-1]
+            self.assertIn(f"http://127.0.0.1:", script, fname)
+            self.assertIn(f"/{keep}", script, fname)
+
+    def test_web_falls_back_to_open_when_xdg_open_missing(self):
+        ok, _status = runner.run_file(
+            "/tmp/page.html",
+            _which=make_which({"kitty", "python3", "open"}),
+            _popen=fake_popen, env={})
+        self.assertTrue(ok)
+        script = CAPTURE[0][0][-1]
+        self.assertIn("open http://127.0.0.1:", script)
+        self.assertNotIn("xdg-open", script)
+
+    def test_web_without_browser_opener_reports_reason(self):
+        ok, status = runner.run_file(
+            "/tmp/page.html", _which=make_which({"kitty", "python3"}),
+            _popen=fake_popen, env={})
+        self.assertFalse(ok)
+        self.assertIn("no browser opener found", status)
+        self.assertEqual([], CAPTURE)
+
+    def test_web_still_requires_a_terminal(self):
+        ok, status = runner.run_file(
+            "/tmp/page.html", _which=make_which({"python3", "xdg-open"}),
+            _popen=fake_popen, env={})
+        self.assertFalse(ok)
+        self.assertIn("No terminal emulator found", status)
+
+    def test_web_url_encodes_space_in_filename(self):
+        ok, _status = runner.run_file(
+            "/tmp/my page.html",
+            _which=make_which({"kitty", "xdg-open"}),
+            _popen=fake_popen, env={})
+        self.assertTrue(ok)
+        script = CAPTURE[0][0][-1]
+        self.assertIn("my%20page.html", script)
+        self.assertIn("/my%20page.html", script)
+
+    def test_web_popen_error_reports_friendly_status(self):
+        def boom(_argv, *a, **k):
+            raise OSError("no DISPLAY")
+        ok, status = runner.run_file(
+            "/tmp/page.html",
+            _which=make_which({"kitty", "xdg-open"}), _popen=boom)
+        self.assertFalse(ok)
+        self.assertIn("Could not launch terminal", status)
+        self.assertIn("no DISPLAY", status)
 
     def test_missing_runtime_cascades_to_status(self):
         ok, status = runner.run_file(

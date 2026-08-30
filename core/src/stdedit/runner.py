@@ -17,7 +17,10 @@ showing the exit code plus further actions (``r`` rerun, ``Enter`` close);
 ``r`` reruns in place while any other key closes the window.  When
 util-linux ``script`` is available the program runs on a pseudo-terminal, so
 ``print`` output streams live for every language instead of collecting in a
-block buffer.  Decoration can be tuned per run:
+block buffer.  Web sources (``.html``, ``.htm``, ``.xhtml``, ``.svg``,
+``.md``, ``.markdown``) are served instead of executed: a local dev server
+starts in the terminal and the default browser opens the page.  Decoration
+can be tuned per run:
 
   ``STDEDIT_RUN_RAW=1``  plain script, no title/header/colors (test hook)
   ``NO_COLOR``           keep the header and title, drop ANSI colors
@@ -33,8 +36,10 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import tempfile
+import urllib.parse
 from typing import Callable, List, Optional, Tuple
 
 from . import icons
@@ -98,10 +103,16 @@ _RUNTIMES = {
 # Fallback: run with whatever POSIX shell is available.
 _SHELL_FALLBACKS = ("bash", "zsh", "sh")
 
-# Extensions with no executable to run.
-_NON_RUNNABLE = frozenset({".md", ".markdown", ".html", ".htm", ".css", ".scss",
-                           ".sass", ".json", ".yaml", ".yml", ".sql", ".xml",
-                           ".svg", ".xhtml", ".txt"})
+# Extensions with no executable to run (web sources are served instead).
+_NON_RUNNABLE = frozenset({".css", ".scss", ".sass", ".json", ".yaml",
+                           ".yml", ".sql", ".xml", ".txt"})
+
+# Web sources: running one starts a local dev server and opens the default
+# browser instead of executing it in a terminal.
+_WEB_EXT = frozenset({".html", ".htm", ".xhtml", ".svg", ".md", ".markdown"})
+
+# Browser openers, most portable first (mirrors filemanager._REVEALERS).
+_BROWSER_OPENERS = ("xdg-open", "open")
 
 # Display names for the run header, keyed by the runtime executable.
 _RUNTIME_LABELS = {
@@ -162,6 +173,8 @@ def run_command_for(
     ext = _os_ext(path)
     if not ext:
         return None, f"No runner for {ext_label(path)}"
+    if ext in _WEB_EXT:
+        return None, f"Opens {ext} in a browser via a local server"
     if ext in _NON_RUNNABLE:
         return None, f"No run command for {ext}"
     spec = _runtime_for(ext)
@@ -182,6 +195,49 @@ def run_command_for(
             f"{runtime} {path}")
 
 
+def _pick_free_port() -> int:
+    """Pick an ephemeral TCP port on loopback that is free right now."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _web_command(
+    path: str,
+    port: int,
+    _which: Callable[[str], Optional[str]] = shutil.which,
+) -> Tuple[Optional[str], str]:
+    """Build the bash *command* that serves *path* on a local dev server.
+
+    The command starts ``python3 -m http.server`` (stdlib) in the background
+    serving the file's directory, polls the port until it accepts
+    connections, opens the page in the default browser (``xdg-open`` or
+    ``open``), then waits on the server so the terminal stays alive showing
+    its access log.  Ctrl-C stops the server and returns 130 instead of
+    killing the whole script, so the usual summary line still appears.  The
+    whole flow is one bash line so the run loop can append its own ``; }``
+    terminator.  Returns ``(command, opener)`` or ``(None, reason)`` when no
+    browser opener is installed.
+    """
+    opener = next((name for name in _BROWSER_OPENERS if _which(name)), None)
+    if opener is None:
+        return None, "no browser opener found"
+    directory = os.path.dirname(os.path.abspath(path))
+    base = os.path.basename(path)
+    url = f"http://127.0.0.1:{port}/{urllib.parse.quote(base)}"
+    server = shlex.quote(directory)
+    return (
+        "trap 'kill $server_pid 2>/dev/null' INT; "
+        f"python3 -m http.server --bind 127.0.0.1 {port} "
+        f"--directory {server} & server_pid=$!; "
+        f"for _ in $(seq 1 100); do "
+        f"if : >/dev/tcp/127.0.0.1/{port} 2>/dev/null; then break; fi; "
+        f"sleep 0.05; done; "
+        f"{opener} {shlex.quote(url)}; "
+        f"wait $server_pid; trap - INT"
+    ), opener
+
+
 def run_file(
     path: str,
     _which: Callable[[str], Optional[str]] = shutil.which,
@@ -191,26 +247,50 @@ def run_file(
 ) -> Tuple[bool, str]:
     """Open *path* in an external terminal and run it.
 
-    Returns (ok, status): on success status names the interpreter and the
-    terminal used; on failure it explains why (no terminal, no runtime, no
-    runner, launch error).  ``pty`` (True/False/None) pins whether the run
-    gets a pseudo-terminal; None auto-detects util-linux ``script``.
+    Web sources (``.html``, ``.htm``, ``.xhtml``, ``.svg``, ``.md``,
+    ``.markdown``) are served instead: a local dev server starts in the
+    terminal and the default browser opens the page.  Returns (ok, status):
+    on success status names the interpreter and the terminal used; on failure
+    it explains why (no terminal, no runtime, no runner, launch error).
+    ``pty`` (True/False/None) pins whether the run gets a pseudo-terminal;
+    None auto-detects util-linux ``script``.
     """
     if not path:
         return False, "Nothing to run"
     launcher = terminal_launcher(_which=_which, env=env)
     if launcher is None:
         return False, "No terminal emulator found (install kitty, gnome-terminal, ...)"
-    command, display = run_command_for(path, _which=_which)
-    if command is None:
-        return False, display
     environ = env if env is not None else os.environ
     raw = environ.get(_STDEDIT_RUN_RAW_ENV) == "1"
     colors = not raw and _NO_COLOR_ENV not in environ
-    runtime = display.split(None, 1)[0] if display else ""
     glyph = icons.icon_for_file(path, icons.enabled_from_env(environ))
+    ext = _os_ext(path)
+    if ext in _WEB_EXT:
+        base = os.path.basename(path) or path
+        port = _pick_free_port()
+        command, opener = _web_command(path, port, _which=_which)
+        if command is None:
+            return False, opener
+        display = f"http://127.0.0.1:{port}/{urllib.parse.quote(base)}"
+        script = _build_script(path, command, runtime="", icon=glyph,
+                               raw=raw, colors=colors, pty=False)
+        return _launch(display, launcher, script, _popen=_popen)
+    command, display = run_command_for(path, _which=_which)
+    if command is None:
+        return False, display
+    runtime = display.split(None, 1)[0] if display else ""
     script = _build_script(path, command, runtime=runtime, icon=glyph,
                            raw=raw, colors=colors, pty=pty)
+    return _launch(display, launcher, script, _popen=_popen)
+
+
+def _launch(
+    display: str,
+    launcher: List[str],
+    script: str,
+    _popen: Callable[..., object] = subprocess.Popen,
+) -> Tuple[bool, str]:
+    """Launch *script* in the *launcher* terminal; return (ok, status)."""
     argv = launcher + ["bash", "-c", script]
     try:
         _popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
