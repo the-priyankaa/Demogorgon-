@@ -605,6 +605,13 @@ def _curses_main(stdscr, buf: Buffer, extension_names=None, extension_files=None
             status = (status + "  " if status else "") + f"{len(extension_errors)} extension error(s)"
         hint = "File tree active — Enter opens file/folder, Esc to focus editor, Ctrl-H help"
         status = (status + "   " if status else "") + hint
+        if buf.image_format is not None and buf.filename:
+            # Image passed on the command line: open it in the default
+            # browser the same way in-editor opens do.
+            opened, _ = runner.open_in_browser(buf.filename)
+            note = (f"Opened {buf.filename} in the default browser"
+                    if opened else "Could not open image in browser")
+            status = (status + "   " if status else "") + note
         _main_loop(stdscr, buf, language, status, selecting, meter, extensions, editor, explorer, icons_on, root_dir, git_panel, diff_viewer, project_dir, tree_on_start)
     finally:
         extensions.shutdown()
@@ -628,7 +635,7 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
     _git_refresh_time = 0.0
     _git_refresh_interval = 2.0  # seconds between git status refreshes
     dashboard_active = (buf.filename is None and project_dir is None)
-    image_view_active = buf.image_format is not None
+    image_view_active = False
     image_state = {
         "pixels": None, "width": 0, "height": 0,
         "error": None, "decoded": False,
@@ -867,9 +874,6 @@ def _main_loop(stdscr, buf: Buffer, language: str, status: str, selecting: bool,
                 and image_state.get("path") != buf.image_path):
             _forget_image_pixels(image_state)
             image_state["path"] = buf.image_path
-            image_view_active = True
-            status = "Image opened — viewer active"
-            continue
         height, width = stdscr.getmaxyx()
         text_height = height - 1  # reserve last row for status line
 
@@ -3017,6 +3021,16 @@ def open_file_path(stdscr, buf: Buffer, explorer: Optional[FileExplorer], path: 
         err = buf.load_error
         buf.load_error = None
         return current_language, err
+    if buf.image_format is not None:
+        # Image file: hand it to the default browser (name it in the status
+        # line) instead of auto-taking-over the screen with the terminal
+        # viewer.  The inert placeholder buffer stays; Ctrl-\ still opens
+        # the in-terminal viewer on demand.
+        language = schema.detect_language(buf.filename or "")
+        ok, info = runner.open_in_browser(path)
+        if ok:
+            return language, f"Opened {path} in the default browser"
+        return language, f"Could not open image in browser: {info}"
     language = schema.detect_language(buf.filename or "")
     if explorer is not None:
         abs_path = os.path.abspath(path)

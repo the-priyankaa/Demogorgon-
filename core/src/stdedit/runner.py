@@ -19,7 +19,10 @@ util-linux ``script`` is available the program runs on a pseudo-terminal, so
 ``print`` output streams live for every language instead of collecting in a
 block buffer.  Web sources (``.html``, ``.htm``, ``.xhtml``, ``.svg``,
 ``.md``, ``.markdown``) are served instead of executed: a local dev server
-starts in the terminal and the default browser opens the page.  Decoration
+starts in the terminal and the default browser opens the page.  Images
+(``.png``, ``.jpg``, ``.gif``, and friends) are handed straight to the
+default browser via ``open_in_browser()`` — no terminal or server involved.
+Decoration
 can be tuned per run:
 
   ``STDEDIT_RUN_RAW=1``  plain script, no title/header/colors (test hook)
@@ -111,6 +114,12 @@ _NON_RUNNABLE = frozenset({".css", ".scss", ".sass", ".json", ".yaml",
 # browser instead of executing it in a terminal.
 _WEB_EXT = frozenset({".html", ".htm", ".xhtml", ".svg", ".md", ".markdown"})
 
+# Images: running (or opening) one just hands the file to the default
+# browser via the platform opener — no terminal, no dev server.
+_IMAGE_EXT = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
+                        ".ico", ".tif", ".tiff", ".heic", ".heif", ".avif",
+                        ".ppm", ".pgm", ".pbm"})
+
 # Browser openers, most portable first (mirrors filemanager._REVEALERS).
 _BROWSER_OPENERS = ("xdg-open", "open")
 
@@ -175,6 +184,8 @@ def run_command_for(
         return None, f"No runner for {ext_label(path)}"
     if ext in _WEB_EXT:
         return None, f"Opens {ext} in a browser via a local server"
+    if ext in _IMAGE_EXT:
+        return None, f"Opens {ext} in the default browser"
     if ext in _NON_RUNNABLE:
         return None, f"No run command for {ext}"
     spec = _runtime_for(ext)
@@ -257,6 +268,9 @@ def run_file(
     """
     if not path:
         return False, "Nothing to run"
+    ext = _os_ext(path)
+    if ext in _IMAGE_EXT:
+        return open_in_browser(path, _which=_which, _popen=_popen)
     launcher = terminal_launcher(_which=_which, env=env)
     if launcher is None:
         return False, "No terminal emulator found (install kitty, gnome-terminal, ...)"
@@ -264,7 +278,6 @@ def run_file(
     raw = environ.get(_STDEDIT_RUN_RAW_ENV) == "1"
     colors = not raw and _NO_COLOR_ENV not in environ
     glyph = icons.icon_for_file(path, icons.enabled_from_env(environ))
-    ext = _os_ext(path)
     if ext in _WEB_EXT:
         base = os.path.basename(path) or path
         port = _pick_free_port()
@@ -299,6 +312,30 @@ def _launch(
         return False, f"Could not launch terminal: {exc}"
     emulator = launcher[0].split("/")[-1]
     return True, f"Running: {display} ({emulator})"
+
+
+def open_in_browser(
+    path: str,
+    _which: Callable[[str], Optional[str]] = shutil.which,
+    _popen: Callable[..., object] = subprocess.Popen,
+) -> Tuple[bool, str]:
+    """Open *path* in the default browser without blocking.
+
+    The file is handed to the platform opener (``xdg-open`` or ``open``) so
+    the browser renders it directly; a static asset doesn't need a terminal
+    or a dev server.  Returns (ok, status): on success status names the
+    opener used; on failure it explains why (no opener, launch error).
+    """
+    opener = next((name for name in _BROWSER_OPENERS if _which(name)), None)
+    if opener is None:
+        return False, "no browser opener found"
+    try:
+        _popen([opener, os.path.abspath(path)],
+               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+               start_new_session=True)
+    except OSError as exc:
+        return False, f"Could not open in browser: {exc}"
+    return True, f"Opening: {os.path.basename(path) or path} ({opener})"
 
 
 def _runtime_label(runtime: str) -> str:

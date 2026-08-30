@@ -408,7 +408,8 @@ class TestSafeOpen(unittest.TestCase):
     def _write(self, relpath, content):
         path = os.path.join(self._tmp.name, relpath)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
+        mode = "wb" if isinstance(content, bytes) else "w"
+        with open(path, mode) as f:
             f.write(content)
         return path
 
@@ -508,6 +509,63 @@ class TestSafeOpen(unittest.TestCase):
         buf = Buffer()
         _, status = open_file_path(None, buf, None, "/nonexistent/nope.py")
         self.assertIn("Error opening file", status)
+
+    def test_image_open_hands_image_to_default_browser(self):
+        import struct
+        import zlib
+        from unittest import mock
+
+        from stdedit import runner
+        from stdedit.buffer import Buffer
+        from stdedit.tui import open_file_path
+
+        def chunk(ctype, data):
+            c = struct.pack(">I", len(data)) + ctype + data
+            return c + struct.pack(">I", zlib.crc32(ctype + data) & 0xFFFFFFFF)
+
+        ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+        png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+               + chunk(b"IDAT", zlib.compress(b"\x00\x01\x02\x03"))
+               + chunk(b"IEND", b""))
+        path = self._write("pic.png", png)
+
+        buf = Buffer()
+        with mock.patch.object(runner, "open_in_browser",
+                               return_value=(True, "Opening: pic.png (xdg-open)")) as ob:
+            language, status = open_file_path(None, buf, None, path)
+
+        self.assertEqual(ob.call_args.args[0], path)
+        self.assertTrue(status.startswith("Opened "))
+        self.assertIn("default browser", status)
+        self.assertEqual(buf.image_format, "png")
+        self.assertEqual(buf.image_path, path)
+
+    def test_image_open_failure_surfaces_reason(self):
+        import struct
+        import zlib
+        from unittest import mock
+
+        from stdedit import runner
+        from stdedit.buffer import Buffer
+        from stdedit.tui import open_file_path
+
+        def chunk(ctype, data):
+            c = struct.pack(">I", len(data)) + ctype + data
+            return c + struct.pack(">I", zlib.crc32(ctype + data) & 0xFFFFFFFF)
+
+        ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+        png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+               + chunk(b"IDAT", zlib.compress(b"\x00\x01\x02\x03"))
+               + chunk(b"IEND", b""))
+        path = self._write("pic.png", png)
+
+        buf = Buffer()
+        with mock.patch.object(runner, "open_in_browser",
+                               return_value=(False, "no browser opener found")):
+            _, status = open_file_path(None, buf, None, path)
+        self.assertIn("Could not open image in browser", status)
+        self.assertIn("no browser opener found", status)
+        self.assertEqual(buf.image_format, "png")
 
 
 class _FakeStdscr:

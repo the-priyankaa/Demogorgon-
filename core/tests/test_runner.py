@@ -126,6 +126,15 @@ class RunCommandForTests(unittest.TestCase):
             self.assertIsNone(cmd, fname)
             self.assertIn("browser via a local server", reason, fname)
 
+    def test_image_extensions_report_browser_reason(self):
+        for fname in ("pic.png", "pic.jpg", "pic.jpeg", "pic.gif", "pic.webp",
+                      "pic.bmp", "pic.ico", "pic.tif", "pic.tiff", "pic.heic",
+                      "pic.heif", "pic.avif", "pic.ppm", "pic.pgm", "pic.pbm"):
+            cmd, reason = runner.run_command_for(
+                fname, _which=make_which({"python3"}))
+            self.assertIsNone(cmd, fname)
+            self.assertIn("default browser", reason, fname)
+
 
 class TerminalLauncherTests(unittest.TestCase):
     def test_prefers_kitty_when_present(self):
@@ -300,6 +309,62 @@ class RunFileTests(unittest.TestCase):
         self.assertIn("Could not launch terminal", status)
         self.assertIn("no DISPLAY", status)
 
+    def test_run_image_opens_xdg_open_directly(self):
+        ok, status = runner.run_file(
+            "/tmp/pic.png", _which=make_which({"xdg-open"}),
+            _popen=fake_popen, env={})
+        self.assertTrue(ok, status)
+        self.assertEqual("Opening: pic.png (xdg-open)", status)
+        self.assertEqual(1, len(CAPTURE))
+        argv, _, kwargs = CAPTURE[0]
+        self.assertEqual(argv, ["xdg-open", "/tmp/pic.png"])
+        self.assertTrue(kwargs.get("start_new_session"))
+
+    def test_run_image_needs_no_terminal(self):
+        ok, status = runner.run_file(
+            "pic.png", _which=make_which({"xdg-open"}),
+            _popen=fake_popen, env={})
+        self.assertTrue(ok, status)
+        argv, _, _ = CAPTURE[0]
+        self.assertNotIn("bash", argv)
+
+    def test_run_image_falls_back_to_open(self):
+        ok, status = runner.run_file(
+            "pic.png", _which=make_which({"open"}),
+            _popen=fake_popen, env={})
+        self.assertTrue(ok, status)
+        self.assertIn("(open)", status)
+        self.assertEqual(["open", os.path.abspath("pic.png")],
+                         CAPTURE[0][0])
+
+    def test_run_image_without_browser_opener_reports_reason(self):
+        ok, status = runner.run_file(
+            "pic.png", _which=make_which({"kitty"}),
+            _popen=fake_popen, env={})
+        self.assertFalse(ok)
+        self.assertIn("no browser opener found", status)
+        self.assertEqual([], CAPTURE)
+
+    def test_run_image_popen_error_reports_friendly_status(self):
+        def boom(_argv, *a, **k):
+            raise OSError("no DISPLAY")
+        ok, status = runner.run_file(
+            "pic.png", _which=make_which({"xdg-open"}), _popen=boom)
+        self.assertFalse(ok)
+        self.assertIn("Could not open in browser", status)
+        self.assertIn("no DISPLAY", status)
+
+    def test_run_each_image_extension_opens_in_browser(self):
+        for ext in ("png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tif",
+                    "tiff", "heic", "heif", "avif", "ppm", "pgm", "pbm"):
+            CAPTURE.clear()
+            ok, status = runner.run_file(
+                f"/tmp/pic.{ext}", _which=make_which({"xdg-open"}),
+                _popen=fake_popen, env={})
+            self.assertTrue(ok, (ext, status))
+            self.assertEqual(["xdg-open", f"/tmp/pic.{ext}"],
+                             CAPTURE[0][0], ext)
+
     def test_missing_runtime_cascades_to_status(self):
         ok, status = runner.run_file(
             "Main.java", _which=make_which({"kitty"}), _popen=fake_popen)
@@ -322,6 +387,53 @@ class RunFileTests(unittest.TestCase):
 
     def assertRegExpIn(self, text, pattern):
         self.assertIsNotNone(re.search(pattern, text), (pattern, text))
+
+
+class OpenInBrowserTests(unittest.TestCase):
+    def setUp(self):
+        CAPTURE.clear()
+
+    def test_prefers_xdg_open_over_open(self):
+        ok, status = runner.open_in_browser(
+            "/tmp/pic.png", _which=make_which({"xdg-open", "open"}),
+            _popen=fake_popen)
+        self.assertTrue(ok, status)
+        self.assertEqual(["Opening:", "pic.png", "(xdg-open)"],
+                         status.split())
+        self.assertEqual(["xdg-open", "/tmp/pic.png"],
+                         CAPTURE[0][0])
+
+    def test_falls_back_to_open(self):
+        ok, status = runner.open_in_browser(
+            "/tmp/pic.png", _which=make_which({"open"}), _popen=fake_popen)
+        self.assertTrue(ok, status)
+        self.assertEqual(["open", "/tmp/pic.png"], CAPTURE[0][0])
+
+    def test_no_opener_reports_reason(self):
+        ok, status = runner.open_in_browser(
+            "/tmp/pic.png", _which=make_which({"kitty"}), _popen=fake_popen)
+        self.assertFalse(ok)
+        self.assertIn("no browser opener found", status)
+        self.assertEqual([], CAPTURE)
+
+    def test_popen_error_reports_friendly_status(self):
+        def boom(_argv, *a, **k):
+            raise OSError("no DISPLAY")
+        ok, status = runner.open_in_browser(
+            "/tmp/pic.png", _which=make_which({"xdg-open"}), _popen=boom)
+        self.assertFalse(ok)
+        self.assertIn("Could not open in browser", status)
+        self.assertIn("no DISPLAY", status)
+
+    def test_uses_absolute_path_and_blocks_nothing(self):
+        ok, _status = runner.open_in_browser(
+            "sub/dir/pic.png", _which=make_which({"xdg-open"}),
+            _popen=fake_popen)
+        self.assertTrue(ok)
+        argv, _, kwargs = CAPTURE[0]
+        self.assertTrue(os.path.isabs(argv[1]), argv)
+        self.assertTrue(argv[1].endswith("/sub/dir/pic.png"), argv)
+        self.assertTrue(kwargs.get("start_new_session"))
 
 
 class RunCurrentFileTests(unittest.TestCase):
